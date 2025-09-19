@@ -1,0 +1,5 @@
+fastapi[standard]
+firebase-admin
+pytest
+pytest-asyncio
+httpx

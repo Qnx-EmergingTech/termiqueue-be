@@ -1,0 +1,12 @@
+version: "3.9"
+services:
+  termiq-backend:
+    build: .
+    container_name: termiq-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./serviceAccountKey.json:/run/secrets/serviceAccountKey.json:ro
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/serviceAccountKey.json

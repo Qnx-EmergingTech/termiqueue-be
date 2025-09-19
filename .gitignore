@@ -1,0 +1,90 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# FastAPI + Uvicorn logs
+*.log
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+*.hypothesis/
+.pytest_cache/
+
+# IDE settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local environment variables
+.env
+.env.*
+!.env.example
+
+# Docker-specific ignores
+docker-compose.override.yml
+.docker/
+.dockerignore
+*.pid
+*.pid.lock
+*.seed
+*.sock
+tmp/
+logs/
+
+# Mypy / Pyre / Pytype
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# SQLite databases (if used for dev)
+*.db
+*.sqlite3
+
+# MacOS / Windows files
+.DS_Store
+Thumbs.db
+
+# Firebase service account keys
+*serviceAccountKey.json

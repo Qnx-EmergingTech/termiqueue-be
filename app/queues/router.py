@@ -46,3 +46,14 @@ def leave_queue(
     service = QueueService(db)
     service.leave_queue(uid, queue_id)
     return {"message": "User has left the queue successfully."}
+
+
+@router.get("/{queue_id}/me/status")
+def get_queue_status(
+    queue_id: str,
+    db: firestore.Client = Depends(get_firestore),
+    uid: str = Depends(verify_token),
+):
+    service = QueueService(db)
+    data = service.get_queue_status(uid, queue_id)
+    return data

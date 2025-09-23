@@ -26,49 +26,28 @@ class QueueService:
             snapshot = queue_ref.get(transaction=transaction)
             data = snapshot.to_dict() or {}
             next_ticket = data.get("next_ticket", 1)
-            priority_seat = data.get("priority_seat", 5)
-            # check how many seniors are in the first senior_seat(5) passengers, if less than senior_seat(5), allow the new senior passenger to take the first senior_seat(5) position
 
-            passengers_ref = queue_ref.collection("passengers")
-            passengers = passengers_ref.order_by("joined_at").stream(
-                transaction=transaction
+            passenger_ref = queue_ref.collection("passengers").document(
+                str(next_ticket)
             )
 
-            passengers_list = [p.to_dict() for p in passengers]
-
-            if is_privileged:
-                # count how many privileged already in front
-                privileged_count = sum(
-                    1 for p in passengers_list if p.get("is_privileged")
-                )
-                if privileged_count < priority_seat:
-                    # place them just after the last privileged already seated
-                    queue_number = privileged_count + 1
-                else:
-                    queue_number = len(passengers_list) + 1
-            else:
-                queue_number = len(passengers_list) + 1
-
-            passenger_ref = passengers_ref.document(str(next_ticket))
             transaction.set(
                 passenger_ref,
                 {
                     "user_id": uid,
                     "status": "waiting",
                     "ticket_number": next_ticket,
-                    "queue_number": queue_number,
                     "is_privileged": is_privileged,
                     "joined_at": firestore.SERVER_TIMESTAMP,
                 },
             )
             transaction.set(queue_ref, {"next_ticket": next_ticket + 1}, merge=True)
-
-            return queue_number
+            return next_ticket
 
         transaction = self.db.transaction()
-        queue_number = transactional_update(transaction, queue_ref)
+        ticket_number = transactional_update(transaction, queue_ref)
         profile_ref.set({"in_queue": True}, merge=True)
-        return {"queue_number": queue_number}
+        return ticket_number
 
     def leave_queue(self, uid: str, queue_id: str):
         profile_ref = self.db.collection("profiles").document(uid)
@@ -102,3 +81,42 @@ class QueueService:
         profile_ref.set({"in_queue": False}, merge=True)
 
         return True
+
+    def get_queue_status(self, uid: str, queue_id: str):
+        queue_ref = self.db.collection("queues").document(queue_id)
+        passengers_ref = queue_ref.collection("passengers")
+
+        docs = list(passengers_ref.where("user_id", "==", uid).limit(1).stream())
+        if not docs:
+            raise HTTPException(status_code=404, detail="User not found in queue")
+
+        my_doc = docs[0]
+        my_data = my_doc.to_dict()
+        # my_ticket = my_data["ticket_number"]
+        # is_privileged = my_data.get("is_privileged", False)
+
+        waiting_passengers = [
+            p.to_dict()
+            for p in passengers_ref.where("status", "==", "waiting").stream()
+        ]
+
+        seniors = [p for p in waiting_passengers if p.get("is_privileged")]
+        normals = [p for p in waiting_passengers if not p.get("is_privileged")]
+
+        seniors.sort(key=lambda p: p["ticket_number"])
+        normals.sort(key=lambda p: p["ticket_number"])
+
+        priority_seat = queue_ref.get().to_dict().get("priority_seat", 5)
+
+        seated_priorities = seniors[:priority_seat]
+
+        rest = seniors[priority_seat:] + normals
+        rest.sort(key=lambda p: p["ticket_number"])
+
+        full_queue = seated_priorities + rest
+
+        queue_map = {p["user_id"]: idx + 1 for idx, p in enumerate(full_queue)}
+
+        my_data["queue_number"] = queue_map[uid]
+
+        return my_data

@@ -3,17 +3,36 @@ from firebase_admin import firestore
 from app.core.geolocation_service import GeolocationService
 from app.core.dependencies import get_firestore, verify_token
 from app.queues.service import QueueService
+from app.queues.schema import CreateQueueInfo, GeofenceCheck, QueueInfoResponse
 
 router = APIRouter(prefix="/queues", tags=["queues"])
 
 
+@router.get("/", response_model=list[QueueInfoResponse])
+def get_queues(db: firestore.Client = Depends(get_firestore)):
+    service = QueueService(db)
+    queues = service.get_queues()
+    return queues
+
+
+@router.post("/")
+def create_terminal_queue(
+    queue_info: CreateQueueInfo,
+    db: firestore.Client = Depends(get_firestore),
+):
+    service = QueueService(db)
+    queue_id = service.create_terminal_queue(
+        queue_info.destination, queue_info.priority_seat
+    )
+    return {"message": "Terminal Queue created successfully.", "queue_id": queue_id}
+
+
 @router.get("/check-geofence")
 def check_geofence(
-    lat: float,
-    lon: float,
+    loc: GeofenceCheck,
 ):
     geolocation_service = GeolocationService()
-    if geolocation_service.is_within_geofence(lat, lon):
+    if geolocation_service.is_within_geofence(loc.lat, loc.lon):
         return {"can_join": True, "message": "User is within the geofence."}
     else:
         return {"can_join": False, "message": "User is outside the geofence."}

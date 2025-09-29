@@ -120,3 +120,28 @@ class QueueService:
         my_data["queue_number"] = queue_map[uid]
 
         return my_data
+
+    def get_queues(self):
+        queues_ref = self.db.collection("queues")
+        queues = []
+        for doc in queues_ref.stream():
+            data = doc.to_dict()
+            data["id"] = doc.id
+            queues.append(data)
+        return queues
+
+    def create_terminal_queue(self, destination: str, priority_seat: int):
+        queue_ref = self.db.collection("queues").document()
+        queue_ref.set(
+            {
+                "destination": destination,
+                "priority_seat": priority_seat,
+                "capacity": None,
+                "bus_id": None,
+                "eta": None,
+                "status": None,
+                "next_ticket": 1,
+                "created_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+        return queue_ref.id

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from firebase_admin import firestore
 from app.core.geolocation_service import GeolocationService
 from app.core.dependencies import get_firestore, verify_token
@@ -27,7 +27,7 @@ def create_terminal_queue(
     return {"message": "Terminal Queue created successfully.", "queue_id": queue_id}
 
 
-@router.get("/check-geofence")
+@router.post("/check-geofence")
 def check_geofence(
     loc: GeofenceCheck,
 ):

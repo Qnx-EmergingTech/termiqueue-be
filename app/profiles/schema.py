@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 
 
@@ -11,6 +11,7 @@ class UserProfile(BaseModel):
     birthdate: datetime
     is_privileged: bool
     in_queue: bool = False
+    user_type: Literal["normal_user", "bus_attendant"] = "normal_user"
 
 
 class UserProfileUpdate(BaseModel):
@@ -21,6 +22,7 @@ class UserProfileUpdate(BaseModel):
     birthdate: Optional[datetime] = None
     is_privileged: Optional[bool] = None
     in_queue: Optional[bool] = None
+    user_type: Optional[Literal["normal_user", "bus_attendant"]] = None
 
     def to_update_dict(self):
         return self.dict(exclude_unset=True)

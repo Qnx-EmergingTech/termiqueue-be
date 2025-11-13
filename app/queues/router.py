@@ -8,20 +8,22 @@ from app.queues.schema import CreateQueueInfo, GeofenceCheck, QueueInfoResponse
 router = APIRouter(prefix="/queues", tags=["queues"])
 
 
+def get_queue_service(db: firestore.Client = Depends(get_firestore)) -> QueueService:
+    return QueueService(db)
+
+
 @router.get("/", response_model=list[QueueInfoResponse])
-def get_queues(db: firestore.Client = Depends(get_firestore)):
-    service = QueueService(db)
-    queues = service.get_queues()
+def get_queues(queue_service: QueueService = Depends(get_queue_service)):
+    queues = queue_service.get_queues()
     return queues
 
 
 @router.post("/")
 def create_terminal_queue(
     queue_info: CreateQueueInfo,
-    db: firestore.Client = Depends(get_firestore),
+    queue_service: QueueService = Depends(get_queue_service),
 ):
-    service = QueueService(db)
-    queue_id = service.create_terminal_queue(
+    queue_id = queue_service.create_terminal_queue(
         queue_info.destination, queue_info.priority_seat
     )
     return {"message": "Terminal Queue created successfully.", "queue_id": queue_id}
@@ -40,16 +42,11 @@ def check_geofence(
 
 @router.post("/{queue_id}/join")
 def join_queue(
-    # lat: float,
-    # lon: float,
     queue_id: str,
-    db: firestore.Client = Depends(get_firestore),
+    queue_service: QueueService = Depends(get_queue_service),
     uid: str = Depends(verify_token),
 ):
-    # if not is_within_geofence(lat, lon):
-    #     raise HTTPException(status_code=403, detail="User is outside the geofence.")
-    service = QueueService(db)
-    ticket_number = service.join_queue(uid, queue_id)
+    ticket_number = queue_service.join_queue(uid, queue_id)
     return {
         "message": "User has joined the queue successfully.",
         "ticket_number": ticket_number,
@@ -59,20 +56,18 @@ def join_queue(
 @router.post("/{queue_id}/leave")
 def leave_queue(
     queue_id: str,
-    db: firestore.Client = Depends(get_firestore),
+    queue_service: QueueService = Depends(get_queue_service),
     uid: str = Depends(verify_token),
 ):
-    service = QueueService(db)
-    service.leave_queue(uid, queue_id)
+    queue_service.leave_queue(uid, queue_id)
     return {"message": "User has left the queue successfully."}
 
 
 @router.get("/{queue_id}/me/status")
 def get_queue_status(
     queue_id: str,
-    db: firestore.Client = Depends(get_firestore),
+    queue_service: QueueService = Depends(get_queue_service),
     uid: str = Depends(verify_token),
 ):
-    service = QueueService(db)
-    data = service.get_queue_status(uid, queue_id)
+    data = queue_service.get_queue_status(uid, queue_id)
     return data

@@ -97,5 +97,4 @@ def update_bus_location(
     uid: str = Depends(verify_token),
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
-    
     return bus_service.update_bus_location(bus_id, uid, location.lat, location.lon)

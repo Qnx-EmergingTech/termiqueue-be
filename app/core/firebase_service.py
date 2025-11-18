@@ -26,7 +26,7 @@ class FirebaseService:
             return decoded_token["uid"]
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     # FCM firebase service
     def send_fcm(self, title: str, body: str, token: str):
         message = messaging.Message(

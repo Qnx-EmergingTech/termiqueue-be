@@ -51,6 +51,7 @@ class ClaimBusResponse(BaseModel):
     attendant_id: str
     attendant_name: str
 
+
 class BusLocationUpdate(BaseModel):
     lat: float
     lon: float

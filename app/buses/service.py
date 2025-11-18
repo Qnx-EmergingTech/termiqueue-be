@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from firebase_admin import firestore
 from datetime import datetime
 
+
 class BusService:
     def __init__(self, db: firestore.Client):
         self.db = db

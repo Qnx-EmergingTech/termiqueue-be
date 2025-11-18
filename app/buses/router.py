@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from firebase_admin import firestore
 from typing import List
 from app.core.dependencies import get_firestore, verify_token, require_bus_attendant
-from app.buses.schema import BusInfo, BusInfoResponse, BusInfoUpdate, ClaimBusResponse, BusLocationUpdate
+from app.buses.schema import (
+    BusInfo,
+    BusInfoResponse,
+    BusInfoUpdate,
+    ClaimBusResponse,
+    BusLocationUpdate,
+)
 from app.buses.service import BusService
 
 router = APIRouter(prefix="/buses", tags=["buses"])
@@ -81,6 +87,7 @@ def get_my_bus(
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
     return bus_service.get_my_bus(uid)
+
 
 @router.post("/{bus_id}/location")
 def update_bus_location(

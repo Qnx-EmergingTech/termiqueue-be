@@ -1,5 +1,6 @@
 from fastapi import HTTPException
 from firebase_admin import firestore
+from datetime import datetime
 
 
 class BusService:
@@ -178,3 +179,37 @@ class BusService:
                 "lon": data["current_location"].longitude,
             }
         return data
+
+    def update_bus_location(self, bus_id: str, uid: str, lat: float, lon: float):
+        bus_ref = self.db.collection("buses").document(bus_id)
+        bus_snapshot = bus_ref.get()
+
+        if not bus_snapshot.exists:
+            raise HTTPException(status_code=404, detail="Bus not found")
+
+        bus_data = bus_snapshot.to_dict()
+
+        if bus_data.get("status") != "active":
+            raise HTTPException(status_code=400, detail="Bus is not active")
+
+        if bus_data.get("attendant_id") != uid:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not the assigned attendant for this bus",
+            )
+
+        geo_point = firestore.GeoPoint(lat, lon)
+
+        bus_ref.update(
+            {
+                "current_location": geo_point,
+                "last_location_update": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+
+        return {
+            "id": bus_id,
+            "message": "Location updated successfully",
+            "current_location": {"lat": lat, "lon": lon},
+        }

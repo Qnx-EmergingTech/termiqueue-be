@@ -2,8 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from firebase_admin import firestore
 
 # from app.core.firebase_service import get_firestore, verify_token
-from app.profiles.schema import UserProfile, UserProfileResponse, UserProfileUpdate
+from app.profiles.schema import (
+    UserProfile,
+    UserProfileResponse,
+    UserProfileUpdate,
+    FCMToken,
+)
 from app.core.dependencies import get_firestore, verify_token
+
+from app.core.notification_service import NotificationService
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
@@ -46,3 +53,20 @@ def update_profile(
 
     profile_ref.update(profile.to_update_dict())
     return {"id": uid, "message": "Profile updated successfully"}
+
+
+@router.post("/register-fcm")
+def register_fcm_token(
+    token: FCMToken,
+    db: firestore.Client = Depends(get_firestore),
+    uid: str = Depends(verify_token),
+):
+    fcm_token_value = token.fcm_token
+
+    profile_ref = db.collection("profiles").document(uid)
+    if not profile_ref.get().exists:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    profile_ref.update({"fcm_token": fcm_token_value})
+
+    return {"message": "FCM token registered successfully"}

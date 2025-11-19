@@ -31,3 +31,7 @@ class UserProfileUpdate(BaseModel):
 class UserProfileResponse(BaseModel):
     id: str
     message: str
+
+
+class FCMToken(BaseModel):
+    fcm_token: str

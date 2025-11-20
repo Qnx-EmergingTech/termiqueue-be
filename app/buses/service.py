@@ -8,6 +8,19 @@ class BusService:
         self.db = db
 
     def create_bus(self, bus_data):
+        existing = (
+            self.db.collection("buses")
+            .where("plate_number", "==", bus_data["plate_number"])
+            .limit(1)
+            .stream()
+        )
+
+        for _ in existing:
+            raise HTTPException(
+                status_code=409,
+                detail="A bus with this plate number is already registered",
+            )
+
         bus_ref = self.db.collection("buses").document()
 
         geo_point = None
@@ -19,8 +32,11 @@ class BusService:
         bus_doc = {
             "id": bus_ref.id,
             "plate_number": bus_data["plate_number"],
+            "bus_name": bus_data["bus_name"],
+            "bus_number": bus_data["bus_number"],
             "priority_seat": bus_data["priority_seat"],
             "capacity": bus_data["capacity"],
+            "origin": bus_data["origin"],
             "destination": bus_data.get("destination"),
             "status": bus_data.get("status", "available"),
             "current_location": geo_point,

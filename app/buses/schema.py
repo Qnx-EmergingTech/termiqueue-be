@@ -64,3 +64,7 @@ class ClaimBusResponse(BaseModel):
 class BusLocationUpdate(BaseModel):
     lat: float
     lon: float
+
+
+class BusArrivalRequest(BaseModel):
+    pass

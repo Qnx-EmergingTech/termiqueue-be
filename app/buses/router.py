@@ -89,6 +89,16 @@ def get_my_bus(
     return bus_service.get_my_bus(uid)
 
 
+@router.post("/{bus_id}/arrive")
+def bus_arrival(
+    bus_id: str,
+    bus_service: BusService = Depends(get_bus_service),
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+):
+    return bus_service.mark_bus_arrival(bus_id, uid)
+
+
 @router.post("/{bus_id}/location")
 def update_bus_location(
     bus_id: str,

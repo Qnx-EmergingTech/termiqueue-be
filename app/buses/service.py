@@ -229,3 +229,75 @@ class BusService:
             "message": "Location updated successfully",
             "current_location": {"lat": lat, "lon": lon},
         }
+
+    def mark_bus_arrival(self, bus_id: str, uid: str):
+        bus_ref = self.db.collection("buses").document(bus_id)
+        bus_snapshot = bus_ref.get()
+
+        if not bus_snapshot.exists:
+            raise HTTPException(status_code=404, detail="Bus not found")
+
+        bus = bus_snapshot.to_dict()
+
+        if bus.get("attendant_id") != uid:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not the assigned attendant for this bus",
+            )
+
+        destination = bus.get("destination")
+        if not destination:
+            raise HTTPException(
+                status_code=400, detail="Bus does not have an assigned destination"
+            )
+
+        if bus.get("status") == "arrived":
+            return {
+                "message": "Bus is already marked as arrived",
+                "queue_updated": False,
+                "queue_id": bus.get("current_queue_id"),
+            }
+
+        queue_query = (
+            self.db.collection("queues")
+            .where("destination", "==", destination)
+            .where("status", "==", None)
+            .limit(1)
+            .stream()
+        )
+
+        queue_docs = list(queue_query)
+        queue_updated = False
+        queue_id = None
+
+        if queue_docs:
+            queue_snapshot = queue_docs[0]
+            queue_ref = queue_snapshot.reference
+            queue_id = queue_snapshot.id
+
+            queue_ref.update(
+                {
+                    "status": "boarding",
+                    "bus_id": bus_id,
+                    "capacity": bus.get("capacity"),
+                    "priority_seat": bus.get("priority_seat"),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
+
+            queue_updated = True
+
+        bus_ref.update(
+            {
+                "status": "arrived",
+                "arrived_at": firestore.SERVER_TIMESTAMP,
+                "current_queue_id": queue_id,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+
+        return {
+            "message": "Bus arrival recorded",
+            "queue_updated": queue_updated,
+            "queue_id": queue_id,
+        }

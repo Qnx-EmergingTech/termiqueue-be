@@ -1,5 +1,6 @@
 from fastapi import HTTPException
 from firebase_admin import firestore
+from typing import Optional
 
 
 class QueueService:
@@ -145,3 +146,14 @@ class QueueService:
             }
         )
         return queue_ref.id
+
+    def get_passenger(self, uid: str, queue_id: str) -> dict:
+        queue_ref = self.db.collection("queues").document(queue_id)
+        passengers_ref = queue_ref.collection("passengers")
+        docs = list(passengers_ref.where("user_id", "==", uid).limit(1).stream())
+        if not docs:
+            raise HTTPException(status_code=404, detail="User not found in queue")
+        doc = docs[0]
+        data = doc.to_dict() or {}
+        data["__doc_id"] = doc.id
+        return data

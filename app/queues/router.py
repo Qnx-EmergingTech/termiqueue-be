@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from firebase_admin import firestore
 from app.core.geolocation_service import GeolocationService
 from app.core.dependencies import get_firestore, verify_token
 from app.queues.service import QueueService
 from app.queues.schema import CreateQueueInfo, GeofenceCheck, QueueInfoResponse
+from app.core.qr_service import QRService
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/queues", tags=["queues"])
 
@@ -71,3 +73,30 @@ def get_queue_status(
 ):
     data = queue_service.get_queue_status(uid, queue_id)
     return data
+
+
+@router.get("/{queue_id}/my-qr-code")
+def get_my_qr_code(
+    queue_id: str,
+    queue_service: QueueService = Depends(get_queue_service),
+    uid: str = Depends(verify_token),
+):
+    passenger = queue_service.get_passenger(uid, queue_id)
+    ticket_number = passenger.get("ticket_number")
+    if ticket_number is None:
+        raise HTTPException(
+            status_code=500, detail="Passenger record missing ticket_number"
+        )
+
+    issued_at = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "user_id": uid,
+        "queue_id": queue_id,
+        "ticket_number": ticket_number,
+        "issued_at": issued_at,
+    }
+
+    qr_service = QRService()
+    qr_b64 = qr_service.generate_qr_base64(payload)
+
+    return {"qr_base64": qr_b64, "message": "QR code generated successfully."}

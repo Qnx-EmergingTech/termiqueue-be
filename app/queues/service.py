@@ -19,6 +19,11 @@ class QueueService:
             raise HTTPException(status_code=400, detail="User already in queue")
 
         is_privileged = profile_data.get("is_privileged", False)
+        first_name = profile_data.get("first_name")
+        middle_name = profile_data.get("middle_name")
+        last_name = profile_data.get("last_name")
+
+        full_name = " ".join(p for p in [first_name, middle_name, last_name] if p)
 
         queue_ref = self.db.collection("queues").document(queue_id)
 
@@ -36,6 +41,7 @@ class QueueService:
                 passenger_ref,
                 {
                     "user_id": uid,
+                    "full_name": full_name,
                     "status": "waiting",
                     "ticket_number": next_ticket,
                     "is_privileged": is_privileged,
@@ -150,10 +156,17 @@ class QueueService:
     def get_passenger(self, uid: str, queue_id: str) -> dict:
         queue_ref = self.db.collection("queues").document(queue_id)
         passengers_ref = queue_ref.collection("passengers")
+
         docs = list(passengers_ref.where("user_id", "==", uid).limit(1).stream())
         if not docs:
             raise HTTPException(status_code=404, detail="User not found in queue")
+
         doc = docs[0]
         data = doc.to_dict() or {}
-        data["__doc_id"] = doc.id
+
+        try:
+            data["ticket_number"] = int(doc.id)
+        except ValueError:
+            data["ticket_number"] = doc.id
+
         return data

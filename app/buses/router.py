@@ -8,8 +8,11 @@ from app.buses.schema import (
     BusInfoUpdate,
     ClaimBusResponse,
     BusLocationUpdate,
+    QRScanRequest,
 )
 from app.buses.service import BusService
+from app.core.qr_service import QRService
+from app.queues.service import QueueService
 
 router = APIRouter(prefix="/buses", tags=["buses"])
 
@@ -108,3 +111,25 @@ def update_bus_location(
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
     return bus_service.update_bus_location(bus_id, uid, location.lat, location.lon)
+
+
+@router.post("/{bus_id}/scan-qr")
+def scan_qr_code(
+    bus_id: str,
+    body: QRScanRequest,
+    bus_service: BusService = Depends(get_bus_service),
+    db: firestore.Client = Depends(get_firestore),
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+):
+    qr_service = QRService()
+    queue_service = QueueService(db)
+
+    try:
+        payload = qr_service.decrypt_token_wrapper(body.qr_json)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or tampered QR code")
+
+    result = bus_service.scan_qr_and_board(bus_id, payload, queue_service)
+
+    return result

@@ -68,3 +68,7 @@ class BusLocationUpdate(BaseModel):
 
 class BusArrivalRequest(BaseModel):
     pass
+
+
+class QRScanRequest(BaseModel):
+    qr_json: str

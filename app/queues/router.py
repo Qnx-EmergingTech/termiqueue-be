@@ -82,6 +82,7 @@ def get_my_qr_code(
     uid: str = Depends(verify_token),
 ):
     passenger = queue_service.get_passenger(uid, queue_id)
+    full_name = passenger.get("full_name")
     ticket_number = passenger.get("ticket_number")
     if ticket_number is None:
         raise HTTPException(
@@ -92,6 +93,7 @@ def get_my_qr_code(
     payload = {
         "user_id": uid,
         "queue_id": queue_id,
+        "full_name": full_name,
         "ticket_number": ticket_number,
         "issued_at": issued_at,
     }

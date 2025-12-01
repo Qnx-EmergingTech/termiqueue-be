@@ -301,3 +301,73 @@ class BusService:
             "queue_updated": queue_updated,
             "queue_id": queue_id,
         }
+
+    def scan_qr_and_board(self, bus_id: str, payload: dict, queue_service):
+        user_id = payload.get("user_id")
+        full_name = payload.get("full_name")
+        queue_id = payload.get("queue_id")
+        ticket_number = payload.get("ticket_number")
+
+        if not (user_id and queue_id and ticket_number):
+            raise HTTPException(status_code=400, detail="Malformed QR payload")
+
+        bus_ref = self.db.collection("buses").document(bus_id)
+        bus_snapshot = bus_ref.get()
+        if not bus_snapshot.exists:
+            raise HTTPException(status_code=404, detail="Bus not found")
+
+        bus = bus_snapshot.to_dict()
+
+        if bus.get("attendant_id") is None:
+            raise HTTPException(status_code=403, detail="Bus has no assigned attendant")
+
+        current_queue_id = bus.get("current_queue_id")
+        if current_queue_id != queue_id:
+            raise HTTPException(
+                status_code=400, detail="Passenger belongs to a different queue"
+            )
+
+        queue_ref = self.db.collection("queues").document(queue_id)
+        passenger_ref = queue_ref.collection("passengers").document(str(ticket_number))
+        passenger_snapshot = passenger_ref.get()
+
+        if not passenger_snapshot.exists:
+            raise HTTPException(status_code=404, detail="Passenger not found in queue")
+
+        passenger = passenger_snapshot.to_dict()
+
+        if passenger.get("user_id") != user_id:
+            raise HTTPException(
+                status_code=400, detail="QR does not match passenger entry"
+            )
+
+        if passenger.get("status") == "boarded":
+            raise HTTPException(status_code=400, detail="Passenger already boarded")
+
+        passenger_ref.update(
+            {
+                "status": "boarded",
+                "boarded_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+
+        bus_ref.update(
+            {
+                "boarded_count": firestore.Increment(1),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+
+        profile_ref = self.db.collection("profiles").document(user_id)
+        profile_ref.update({"in_queue": False})
+
+        return {
+            "message": "Passenger boarded successfully",
+            "passenger": {
+                "user_id": user_id,
+                "full_name": full_name,
+                "ticket_number": ticket_number,
+                "is_privileged": passenger.get("is_privileged", False),
+                "status": "boarded",
+            },
+        }

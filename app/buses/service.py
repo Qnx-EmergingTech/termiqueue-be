@@ -261,7 +261,6 @@ class BusService:
         queue_query = (
             self.db.collection("queues")
             .where("destination", "==", destination)
-            .where("status", "==", None)
             .limit(1)
             .stream()
         )
@@ -370,4 +369,77 @@ class BusService:
                 "is_privileged": passenger.get("is_privileged", False),
                 "status": "boarded",
             },
+        }
+
+    def mark_bus_departure(self, bus_id: str, uid: str):
+        bus_ref = self.db.collection("buses").document(bus_id)
+        bus_snapshot = bus_ref.get()
+
+        if not bus_snapshot.exists:
+            raise HTTPException(status_code=404, detail="Bus not found")
+
+        bus = bus_snapshot.to_dict()
+
+        if bus.get("attendant_id") != uid:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not the assigned attendant for this bus",
+            )
+
+        queue_id = bus.get("current_queue_id")
+        if not queue_id:
+            raise HTTPException(
+                status_code=400, detail="Bus is not linked to any queue"
+            )
+
+        queue_ref = self.db.collection("queues").document(queue_id)
+
+        boarded_passengers = (
+            queue_ref.collection("passengers").where("status", "==", "boarded").stream()
+        )
+
+        boarded_ids = []
+        deleted_count = 0
+
+        batch = self.db.batch()
+
+        for p in boarded_passengers:
+            boarded_ids.append(p.id)
+            batch.delete(p.reference)
+            deleted_count += 1
+
+        if deleted_count > 0:
+            batch.commit()
+
+        waiting_passengers = (
+            queue_ref.collection("passengers").where("status", "==", "waiting").stream()
+        )
+
+        waiting_count = sum(1 for _ in waiting_passengers)
+
+        queue_ref.update(
+            {
+                "status": "done" if waiting_count == 0 else "waiting",
+                "remaining_passengers": waiting_count,
+                "bus_id": None,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+
+        bus_ref.update(
+            {
+                "status": "in_transit",
+                "current_queue_id": None,
+                "boarded_count": 0,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+
+        return {
+            "message": "Bus departure recorded",
+            "bus_id": bus_id,
+            "queue_id": queue_id,
+            "boarded_passengers_removed": deleted_count,
+            "remaining_waiting_passengers": waiting_count,
+            "queue_status": "done" if waiting_count == 0 else "waiting",
         }

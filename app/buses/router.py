@@ -133,3 +133,14 @@ def scan_qr_code(
     result = bus_service.scan_qr_and_board(bus_id, payload, queue_service)
 
     return result
+
+
+@router.post("/{bus_id}/depart")
+def depart_bus(
+    bus_id: str,
+    bus_service: BusService = Depends(get_bus_service),
+    db: firestore.Client = Depends(get_firestore),
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+):
+    return bus_service.mark_bus_departure(bus_id, uid)

@@ -144,3 +144,13 @@ def depart_bus(
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
     return bus_service.mark_bus_departure(bus_id, uid)
+
+
+@router.get("/attendant/passengers")
+def get_passenger_list(
+    bus_service: BusService = Depends(get_bus_service),
+    queue_service: QueueService = Depends(lambda: QueueService(get_firestore())),
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+):
+    return bus_service.get_attendant_passenger_list(uid, queue_service)

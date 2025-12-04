@@ -443,3 +443,74 @@ class BusService:
             "remaining_waiting_passengers": waiting_count,
             "queue_status": "done" if waiting_count == 0 else "waiting",
         }
+
+    def get_attendant_passenger_list(self, uid: str, queue_service):
+        buses = (
+            self.db.collection("buses")
+            .where("attendant_id", "==", uid)
+            .limit(1)
+            .stream()
+        )
+
+        bus = None
+        for b in buses:
+            bus = b.to_dict()
+
+        if not bus:
+            raise HTTPException(
+                status_code=404, detail="You are not assigned to any bus"
+            )
+
+        bus_id = bus["id"]
+        capacity = bus.get("capacity", 0)
+        queue_id = bus.get("current_queue_id")
+
+        if not queue_id:
+            return {
+                "bus_id": bus_id,
+                "capacity": capacity,
+                "total_onboard": 0,
+                "passengers": [],
+                "last_passenger_scanned": None,
+            }
+
+        q_ref = self.db.collection("queues").document(queue_id)
+        passenger_snapshots = q_ref.collection("passengers").stream()
+
+        passengers_list = []
+        total_onboard = 0
+        last_scanned = None
+
+        for p in passenger_snapshots:
+            data = p.to_dict()
+
+            passengers_list.append(
+                {
+                    "id": data.get("user_id"),
+                    "name": data.get("full_name"),
+                    "queue_id": queue_id,
+                    "status": data.get("status"),
+                    "timestamp": data.get("joined_at"),
+                }
+            )
+
+            if data.get("status") == "boarded":
+                total_onboard += 1
+
+                boarded_at = data.get("boarded_at")
+                if boarded_at:
+                    if last_scanned is None or boarded_at > last_scanned["timestamp"]:
+                        last_scanned = {
+                            "id": data.get("user_id"),
+                            "name": data.get("full_name"),
+                            "status": "boarded",
+                            "timestamp": boarded_at,
+                        }
+
+        return {
+            "bus_id": bus_id,
+            "capacity": capacity,
+            "total_onboard": total_onboard,
+            "passengers": passengers_list,
+            "last_passenger_scanned": last_scanned,
+        }

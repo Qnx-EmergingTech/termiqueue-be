@@ -1,6 +1,9 @@
 from fastapi import HTTPException
 from firebase_admin import firestore
 from datetime import datetime
+from app.core.geolocation_service import GeolocationService
+from app.core.notification_service import NotificationService
+from firebase_admin import firestore
 
 
 class BusService:
@@ -224,11 +227,80 @@ class BusService:
             }
         )
 
+        self._check_geofence_and_notify(bus_data, lat, lon)
+
         return {
             "id": bus_id,
             "message": "Location updated successfully",
             "current_location": {"lat": lat, "lon": lon},
         }
+
+    def _check_geofence_and_notify(self, bus_data, lat, lon):
+        geofence = GeolocationService()
+        notifier = NotificationService()
+
+        bus_id = bus_data["id"]
+        destination = bus_data.get("destination")
+
+        if not destination:
+            return
+
+        if bus_data.get("last_proximity_notification_sent"):
+            return
+
+        if not geofence.is_within_geofence(lat, lon):
+            return
+
+        queue_query = (
+            self.db.collection("queues")
+            .where("destination", "==", destination)
+            .where("status", "==", "waiting")
+            .limit(1)
+            .stream()
+        )
+
+        queue_docs = list(queue_query)
+        if not queue_docs:
+            return
+
+        queue_ref = queue_docs[0].reference
+
+        passengers = (
+            queue_ref.collection("passengers").where("status", "==", "waiting").stream()
+        )
+
+        user_ids = [
+            p.to_dict().get("user_id") for p in passengers if p.to_dict().get("user_id")
+        ]
+
+        if not user_ids:
+            return
+
+        for user_id in user_ids:
+            profile = self.db.collection("profiles").document(user_id).get().to_dict()
+            token = profile.get("fcm_token") if profile else None
+
+            if not token:
+                continue
+
+            notifier.send_to_token(
+                token=token,
+                title="Your bus is approaching!",
+                body="Your bus is nearing Ayala Terminal. Please prepare for boarding.",
+            )
+
+        self.db.collection("buses").document(bus_id).update(
+            {"last_proximity_notification_sent": firestore.SERVER_TIMESTAMP}
+        )
+
+    def get_waiting_passengers(self, queue_id: str):
+        ref = (
+            self.db.collection("queues")
+            .document(queue_id)
+            .collection("passengers")
+            .where("status", "==", "waiting")
+        )
+        return [p.to_dict() | {"id": p.id} for p in ref.stream()]
 
     def mark_bus_arrival(self, bus_id: str, uid: str):
         bus_ref = self.db.collection("buses").document(bus_id)
@@ -285,6 +357,31 @@ class BusService:
             )
 
             queue_updated = True
+
+            waiting_passengers = (
+                queue_ref.collection("passengers")
+                .where("status", "==", "waiting")
+                .stream()
+            )
+
+            for p in waiting_passengers:
+                passenger = p.to_dict()
+                fcm_token = passenger.get("fcm_token")
+                ticket_number = passenger.get("ticket_number")
+
+                if not fcm_token:
+                    continue
+
+                self.notification_service.send_fcm(
+                    token=fcm_token,
+                    title="Your bus has arrived!",
+                    body=f"Please proceed to boarding. Your position: {ticket_number}",
+                    data={
+                        "queue_id": queue_id,
+                        "ticket_number": str(ticket_number),
+                        "type": "bus_arrival",
+                    },
+                )
 
         bus_ref.update(
             {
@@ -431,6 +528,7 @@ class BusService:
                 "status": "in_transit",
                 "current_queue_id": None,
                 "boarded_count": 0,
+                "last_proximity_notification_sent": None,
                 "updated_at": firestore.SERVER_TIMESTAMP,
             }
         )

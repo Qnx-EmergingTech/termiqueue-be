@@ -293,15 +293,6 @@ class BusService:
             {"last_proximity_notification_sent": firestore.SERVER_TIMESTAMP}
         )
 
-    def get_waiting_passengers(self, queue_id: str):
-        ref = (
-            self.db.collection("queues")
-            .document(queue_id)
-            .collection("passengers")
-            .where("status", "==", "waiting")
-        )
-        return [p.to_dict() | {"id": p.id} for p in ref.stream()]
-
     def mark_bus_arrival(self, bus_id: str, uid: str):
         bus_ref = self.db.collection("buses").document(bus_id)
         bus_snapshot = bus_ref.get()
@@ -320,68 +311,52 @@ class BusService:
         destination = bus.get("destination")
         if not destination:
             raise HTTPException(
-                status_code=400, detail="Bus does not have an assigned destination"
+                status_code=400,
+                detail="Bus does not have an assigned destination",
             )
 
         if bus.get("status") == "arrived":
             return {
-                "message": "Bus is already marked as arrived",
-                "queue_updated": False,
+                "message": "Bus already marked as arrived",
                 "queue_id": bus.get("current_queue_id"),
             }
 
         queue_query = (
             self.db.collection("queues")
             .where("destination", "==", destination)
+            .where("status", "==", "waiting")
             .limit(1)
             .stream()
         )
 
         queue_docs = list(queue_query)
-        queue_updated = False
-        queue_id = None
 
-        if queue_docs:
-            queue_snapshot = queue_docs[0]
-            queue_ref = queue_snapshot.reference
-            queue_id = queue_snapshot.id
-
-            queue_ref.update(
+        if not queue_docs:
+            bus_ref.update(
                 {
-                    "status": "boarding",
-                    "bus_id": bus_id,
-                    "capacity": bus.get("capacity"),
-                    "priority_seat": bus.get("priority_seat"),
+                    "status": "arrived",
+                    "arrived_at": firestore.SERVER_TIMESTAMP,
                     "updated_at": firestore.SERVER_TIMESTAMP,
                 }
             )
+            return {
+                "message": "Bus arrived but no waiting queue found",
+                "queue_id": None,
+            }
 
-            queue_updated = True
+        queue_snapshot = queue_docs[0]
+        queue_ref = queue_snapshot.reference
+        queue_id = queue_snapshot.id
 
-            waiting_passengers = (
-                queue_ref.collection("passengers")
-                .where("status", "==", "waiting")
-                .stream()
-            )
-
-            for p in waiting_passengers:
-                passenger = p.to_dict()
-                fcm_token = passenger.get("fcm_token")
-                ticket_number = passenger.get("ticket_number")
-
-                if not fcm_token:
-                    continue
-
-                self.notification_service.send_fcm(
-                    token=fcm_token,
-                    title="Your bus has arrived!",
-                    body=f"Please proceed to boarding. Your position: {ticket_number}",
-                    data={
-                        "queue_id": queue_id,
-                        "ticket_number": str(ticket_number),
-                        "type": "bus_arrival",
-                    },
-                )
+        queue_ref.update(
+            {
+                "status": "boarding",
+                "bus_id": bus_id,
+                "capacity": bus.get("capacity"),
+                "priority_seat": bus.get("priority_seat"),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
 
         bus_ref.update(
             {
@@ -392,9 +367,34 @@ class BusService:
             }
         )
 
+        notifier = NotificationService()
+
+        waiting_passengers = (
+            queue_ref.collection("passengers").where("status", "==", "waiting").stream()
+        )
+
+        for p in waiting_passengers:
+            passenger = p.to_dict()
+            user_id = passenger.get("user_id")
+            ticket_number = passenger.get("ticket_number")
+
+            if not user_id or ticket_number is None:
+                continue
+
+            profile = self.db.collection("profiles").document(user_id).get().to_dict()
+
+            token = profile.get("fcm_token") if profile else None
+            if not token:
+                continue
+
+            notifier.send_to_token(
+                token=token,
+                title="Your bus has arrived!",
+                body=f"Please proceed to boarding. Your queue number is {ticket_number}.",
+            )
+
         return {
-            "message": "Bus arrival recorded",
-            "queue_updated": queue_updated,
+            "message": "Bus arrival recorded and passengers notified",
             "queue_id": queue_id,
         }
 

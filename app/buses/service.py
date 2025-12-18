@@ -324,7 +324,6 @@ class BusService:
         queue_query = (
             self.db.collection("queues")
             .where("destination", "==", destination)
-            .where("status", "==", "waiting")
             .limit(1)
             .stream()
         )

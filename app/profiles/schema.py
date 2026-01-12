@@ -4,6 +4,7 @@ from datetime import datetime
 
 
 class UserProfile(BaseModel):
+    username: str
     first_name: str
     last_name: str
     middle_name: Optional[str] = None
@@ -26,6 +27,11 @@ class UserProfileUpdate(BaseModel):
 
     def to_update_dict(self):
         return self.dict(exclude_unset=True)
+
+
+class UsernameLoginRequest(BaseModel):
+    username: str
+    password: str
 
 
 class UserProfileResponse(BaseModel):

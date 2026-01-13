@@ -1,10 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional, Literal
 from datetime import datetime
 
 
 class UserProfile(BaseModel):
-    username: str
     first_name: str
     last_name: str
     middle_name: Optional[str] = None
@@ -27,6 +26,12 @@ class UserProfileUpdate(BaseModel):
 
     def to_update_dict(self):
         return self.dict(exclude_unset=True)
+
+
+class SignupRequest(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
 
 
 class UsernameLoginRequest(BaseModel):

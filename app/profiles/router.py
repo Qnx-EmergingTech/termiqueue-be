@@ -47,6 +47,7 @@ def create_profile(
 def signup(
     payload: SignupRequest,
     db: firestore.Client = Depends(get_firestore),
+    uid: str = Depends(verify_token),
 ):
     username_lower = payload.username.lower()
 
@@ -60,15 +61,7 @@ def signup(
     if existing:
         raise HTTPException(status_code=400, detail="Username already taken")
 
-    try:
-        user = auth.create_user(
-            email=payload.email,
-            password=payload.password,
-        )
-    except Exception:
-        raise HTTPException(status_code=400, detail="Unable to create account")
-
-    db.collection("profiles").document(user.uid).set(
+    db.collection("profiles").document(uid).set(
         {
             "username": payload.username,
             "username_lower": username_lower,
@@ -77,10 +70,7 @@ def signup(
         }
     )
 
-    return {
-        "message": "Account created successfully",
-        "uid": user.uid,
-    }
+    return {"message": "Signup completed"}
 
 
 @router.post("/login")

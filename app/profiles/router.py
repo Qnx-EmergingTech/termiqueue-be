@@ -6,6 +6,7 @@ from app.profiles.schema import (
     UserProfile,
     UserProfileResponse,
     UserProfileUpdate,
+    SignupRequest,
     UsernameLoginRequest,
     FCMToken,
 )
@@ -23,10 +24,31 @@ def create_profile(
     uid: str = Depends(verify_token),
 ):
     profile_ref = db.collection("profiles").document(uid)
-    if profile_ref.get().exists:
-        raise HTTPException(status_code=400, detail="Profile already exists")
+    snapshot = profile_ref.get()
 
-    username_lower = profile.username.lower()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    data = snapshot.to_dict()
+    if "first_name" in data:
+        raise HTTPException(status_code=400, detail="Profile already completed")
+
+    profile_ref.update(
+        {
+            **profile.dict(),
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+    )
+
+    return {"id": uid, "message": "Profile created successfully"}
+
+
+@router.post("/signup")
+def signup(
+    payload: SignupRequest,
+    db: firestore.Client = Depends(get_firestore),
+):
+    username_lower = payload.username.lower()
 
     existing = (
         db.collection("profiles")
@@ -38,17 +60,27 @@ def create_profile(
     if existing:
         raise HTTPException(status_code=400, detail="Username already taken")
 
-    profile_ref.set(
+    try:
+        user = auth.create_user(
+            email=payload.email,
+            password=payload.password,
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="Unable to create account")
+
+    db.collection("profiles").document(user.uid).set(
         {
-            **profile.dict(exclude={"username"}),
-            "username": profile.username,
+            "username": payload.username,
             "username_lower": username_lower,
             "created_at": firestore.SERVER_TIMESTAMP,
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
     )
 
-    return {"id": uid, "message": "Profile created successfully"}
+    return {
+        "message": "Account created successfully",
+        "uid": user.uid,
+    }
 
 
 @router.post("/login")

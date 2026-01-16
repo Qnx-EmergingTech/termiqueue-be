@@ -207,7 +207,7 @@ def add_manual_passenger(
         {
             "user_id": walkin_name,
             "full_name": walkin_name,
-            "status": "waiting",
+            "status": "boarded",
             "ticket_number": ticket_number,
             "is_privileged": False,
             "joined_at": firestore.SERVER_TIMESTAMP,

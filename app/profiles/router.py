@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from firebase_admin import firestore, auth
+from datetime import datetime
 import requests, os
 
 from app.profiles.schema import (
@@ -9,12 +10,22 @@ from app.profiles.schema import (
     SignupRequest,
     UsernameLoginRequest,
     FCMToken,
+    TripHistoryResponse,
+    TripHistorySimpleResponse,
 )
+
+from app.profiles.service import ProfileService
 from app.core.dependencies import get_firestore, verify_token
 
 from app.core.notification_service import NotificationService
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
+
+
+def get_profile_service(
+    db: firestore.Client = Depends(get_firestore),
+) -> ProfileService:
+    return ProfileService(db)
 
 
 @router.post("/", response_model=UserProfileResponse)
@@ -169,3 +180,42 @@ def register_fcm_token(
     profile_ref.update({"fcm_token": fcm_token_value})
 
     return {"message": "FCM token registered successfully"}
+
+
+@router.get("/me/trips", response_model=TripHistoryResponse)
+def get_my_trip_history(
+    limit: int = Query(10, ge=1, le=50),
+    start_after_created_at: str | None = Query(
+        None, description="ISO timestamp from previous page"
+    ),
+    start_after_id: str | None = Query(
+        None, description="Trip document ID from previous page"
+    ),
+    uid: str = Depends(verify_token),
+    profile_service: ProfileService = Depends(get_profile_service),
+):
+    created_at_dt = None
+
+    if start_after_created_at:
+        try:
+            created_at_dt = datetime.fromisoformat(start_after_created_at)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="start_after_created_at must be a valid ISO datetime",
+            )
+
+    return profile_service.get_user_trip_history(
+        user_id=uid,
+        limit=limit,
+        start_after_created_at=created_at_dt,
+        start_after_id=start_after_id,
+    )
+
+
+@router.get("/me/trips/all", response_model=TripHistorySimpleResponse)
+def get_all_my_trips(
+    uid: str = Depends(verify_token),
+    profile_service: ProfileService = Depends(get_profile_service),
+):
+    return profile_service.get_trip_history(user_id=uid)

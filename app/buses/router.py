@@ -154,3 +154,75 @@ def get_passenger_list(
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
     return bus_service.get_attendant_passenger_list(uid, queue_service)
+
+
+@router.post("/{bus_id}/manual-add")
+def add_manual_passenger(
+    bus_id: str,
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+    bus_service: BusService = Depends(get_bus_service),
+    queue_service: QueueService = Depends(lambda: QueueService(get_firestore())),
+):
+    """
+    Adds a Walk-in passenger automatically to the current bus queue.
+    Ticket numbers loop back after trip completion.
+    """
+    bus_ref = bus_service.db.collection("buses").document(bus_id)
+    bus_snapshot = bus_ref.get()
+
+    if not bus_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Bus not found")
+
+    bus = bus_snapshot.to_dict()
+    queue_id = bus.get("current_queue_id")
+
+    if not queue_id:
+        raise HTTPException(status_code=400, detail="No active queue for this bus")
+
+    queue_ref = bus_service.db.collection("queues").document(queue_id)
+    passengers_ref = queue_ref.collection("passengers")
+
+    walkin_query = passengers_ref.where("full_name", ">=", "Walk-in #").stream()
+    numbers = []
+    for p in walkin_query:
+        name = p.to_dict().get("full_name", "")
+        if name.startswith("Walk-in #"):
+            try:
+                numbers.append(int(name.split("#")[1]))
+            except:
+                continue
+
+    next_number = max(numbers, default=0) + 1
+    if next_number > 9999:
+        next_number = 1
+
+    walkin_name = f"Walk-in #{next_number:04d}"
+
+    queue_data = queue_ref.get().to_dict()
+    ticket_number = queue_data.get("next_ticket", 1)
+
+    passenger_ref = passengers_ref.document(str(ticket_number))
+    passenger_ref.set(
+        {
+            "user_id": walkin_name,
+            "full_name": walkin_name,
+            "status": "boarded",
+            "ticket_number": ticket_number,
+            "is_privileged": False,
+            "joined_at": firestore.SERVER_TIMESTAMP,
+            "added_by": uid,
+        }
+    )
+
+    queue_ref.update({"next_ticket": ticket_number + 1})
+
+    return {
+        "message": "Walk-in passenger added",
+        "passenger": {
+            "user_id": walkin_name,
+            "full_name": walkin_name,
+            "ticket_number": ticket_number,
+            "added_by": uid,
+        },
+    }

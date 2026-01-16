@@ -42,3 +42,30 @@ class UserProfileResponse(BaseModel):
 
 class FCMToken(BaseModel):
     fcm_token: str
+
+
+class TripSummary(BaseModel):
+    id: str
+    bus_id: str
+    bus_number: str
+    plate_number: str
+    origin: str
+    destination: str
+    ticket_number: int
+    boarded_at: datetime
+    departed_at: datetime
+
+
+class TripCursor(BaseModel):
+    created_at: datetime
+    id: str
+
+
+class TripHistoryResponse(BaseModel):
+    trips: list[TripSummary]
+    limit: int
+    next_cursor: Optional[TripCursor] = None
+
+
+class TripHistorySimpleResponse(BaseModel):
+    trips: list[TripSummary]

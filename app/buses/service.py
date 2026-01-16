@@ -494,13 +494,37 @@ class BusService:
             queue_ref.collection("passengers").where("status", "==", "boarded").stream()
         )
 
-        boarded_ids = []
+        batch = self.db.batch()
+        now = firestore.SERVER_TIMESTAMP
         deleted_count = 0
 
-        batch = self.db.batch()
-
         for p in boarded_passengers:
-            boarded_ids.append(p.id)
+            passenger = p.to_dict()
+            user_id = passenger.get("user_id")
+
+            if not user_id:
+                continue
+
+            trip_ref = self.db.collection("trips").document()
+
+            batch.set(
+                trip_ref,
+                {
+                    "user_id": user_id,
+                    "bus_id": bus_id,
+                    "bus_number": bus.get("bus_number"),
+                    "plate_number": bus.get("plate_number"),
+                    "origin": bus.get("origin"),
+                    "destination": bus.get("destination"),
+                    "queue_id": queue_id,
+                    "ticket_number": passenger.get("ticket_number"),
+                    "is_privileged": passenger.get("is_privileged", False),
+                    "boarded_at": passenger.get("boarded_at"),
+                    "departed_at": now,
+                    "created_at": now,
+                },
+            )
+
             batch.delete(p.reference)
             deleted_count += 1
 

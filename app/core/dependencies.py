@@ -38,3 +38,19 @@ def require_normal_user(
     if profile.get("user_type") != "normal_user":
         raise HTTPException(status_code=403, detail="Normal user access required")
     return profile
+
+
+# for future use when admin account creation endpoint is implemented
+def require_admin(
+    uid: str = Depends(verify_token),
+    db: firestore.Client = Depends(get_firestore),
+):
+    snapshot = db.collection("profiles").document(uid).get()
+
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if snapshot.to_dict().get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return uid

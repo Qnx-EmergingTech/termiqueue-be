@@ -56,16 +56,5 @@ class TripSummary(BaseModel):
     departed_at: datetime
 
 
-class TripCursor(BaseModel):
-    created_at: datetime
-    id: str
-
-
 class TripHistoryResponse(BaseModel):
-    trips: list[TripSummary]
-    limit: int
-    next_cursor: Optional[TripCursor] = None
-
-
-class TripHistorySimpleResponse(BaseModel):
     trips: list[TripSummary]

@@ -1,6 +1,5 @@
 from firebase_admin import firestore
-from typing import Optional
-from datetime import datetime
+from fastapi import HTTPException
 
 
 class ProfileService:
@@ -32,56 +31,26 @@ class ProfileService:
 
         return {"trips": trips}
 
-    def get_user_trip_history(
-        self,
-        user_id: str,
-        limit: int = 10,
-        start_after_created_at: Optional[datetime] = None,
-        start_after_id: Optional[str] = None,
-    ):
-        query = (
-            self.db.collection("trips")
-            .where("user_id", "==", user_id)
-            .order_by("created_at", direction=firestore.Query.DESCENDING)
-            .order_by("__name__")
-            .limit(limit)
-        )
+    def get_trip_by_id(self, *, user_id: str, trip_id: str):
+        trip_ref = self.db.collection("trips").document(trip_id)
+        snapshot = trip_ref.get()
 
-        if start_after_created_at and start_after_id:
-            query = query.start_after(
-                {
-                    "created_at": start_after_created_at,
-                    "__name__": start_after_id,
-                }
-            )
+        if not snapshot.exists:
+            raise HTTPException(status_code=404, detail="Trip not found")
 
-        docs = list(query.stream())
+        data = snapshot.to_dict()
 
-        trips = []
-        next_cursor = None
-
-        for doc in docs:
-            data = doc.to_dict()
-            trips.append(
-                {
-                    "id": doc.id,
-                    "bus_id": data.get("bus_id"),
-                    "bus_number": data.get("bus_number"),
-                    "plate_number": data.get("plate_number"),
-                    "origin": data.get("origin"),
-                    "destination": data.get("destination"),
-                    "ticket_number": data.get("ticket_number"),
-                    "boarded_at": data.get("boarded_at"),
-                    "departed_at": data.get("departed_at"),
-                }
-            )
-            next_cursor = {
-                "created_at": data.get("created_at"),
-                "id": doc.id,
-            }
+        if data.get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
 
         return {
-            "trips": trips,
-            "limit": limit,
-            "next_cursor": next_cursor,
+            "id": snapshot.id,
+            "bus_id": data.get("bus_id"),
+            "bus_number": data.get("bus_number"),
+            "plate_number": data.get("plate_number"),
+            "origin": data.get("origin"),
+            "destination": data.get("destination"),
+            "ticket_number": data.get("ticket_number"),
+            "boarded_at": data.get("boarded_at"),
+            "departed_at": data.get("departed_at"),
         }

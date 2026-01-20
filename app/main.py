@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.profiles import router as profiles
 from app.queues import router as queues
 from app.buses import router as buses
+from app.geofence import router as geofence
 
 app = FastAPI()
 
@@ -17,6 +18,7 @@ app.add_middleware(
 app.include_router(profiles.router)
 app.include_router(queues.router)
 app.include_router(buses.router)
+app.include_router(geofence.router)
 
 
 @app.get("/")

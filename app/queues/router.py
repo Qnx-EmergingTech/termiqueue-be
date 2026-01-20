@@ -34,8 +34,9 @@ def create_terminal_queue(
 @router.post("/check-geofence")
 def check_geofence(
     loc: GeofenceCheck,
+    db: firestore.Client = Depends(get_firestore),
 ):
-    geolocation_service = GeolocationService()
+    geolocation_service = GeolocationService(db)
     if geolocation_service.is_within_geofence(loc.lat, loc.lon):
         return {"can_join": True, "message": "User is within the geofence."}
     else:

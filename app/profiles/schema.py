@@ -10,7 +10,7 @@ class UserProfile(BaseModel):
     birthdate: datetime
     is_privileged: bool = False
     in_queue: bool = False
-    user_type: Literal["normal_user", "bus_attendant"] = "normal_user"
+    user_type: Literal["normal_user", "bus_attendant", "admin"] = "normal_user"
 
 
 class UserProfileUpdate(BaseModel):
@@ -20,7 +20,7 @@ class UserProfileUpdate(BaseModel):
     birthdate: Optional[datetime] = None
     is_privileged: Optional[bool] = None
     in_queue: Optional[bool] = None
-    # user_type: Optional[Literal["normal_user", "bus_attendant"]] = None
+    # user_type: Optional[Literal["normal_user", "bus_attendant", "admin"]] = None
 
     def to_update_dict(self):
         return self.dict(exclude_unset=True)

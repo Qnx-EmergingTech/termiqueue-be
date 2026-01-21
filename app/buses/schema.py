@@ -72,3 +72,7 @@ class BusArrivalRequest(BaseModel):
 
 class QRScanRequest(BaseModel):
     qr_json: str
+
+
+class PrivilegedAddRequest(BaseModel):
+    force: bool = False

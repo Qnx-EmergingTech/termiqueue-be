@@ -8,6 +8,7 @@ from app.buses.schema import (
     BusInfoUpdate,
     ClaimBusResponse,
     BusLocationUpdate,
+    PrivilegedAddRequest,
     QRScanRequest,
 )
 from app.buses.service import BusService
@@ -180,13 +181,20 @@ def add_manual_passenger(
     if not queue_id:
         raise HTTPException(status_code=400, detail="No active queue for this bus")
 
+    capacity = bus.get("capacity", 0)
+
     queue_ref = bus_service.db.collection("queues").document(queue_id)
     passengers_ref = queue_ref.collection("passengers")
 
-    walkin_query = passengers_ref.where("full_name", ">=", "Walk-in #").stream()
+    passengers = [p.to_dict() for p in passengers_ref.stream()]
+    total_boarded = len(passengers)
+
+    if total_boarded >= capacity:
+        raise HTTPException(status_code=400, detail="Bus capacity reached")
+
     numbers = []
-    for p in walkin_query:
-        name = p.to_dict().get("full_name", "")
+    for p in passengers:
+        name = p.get("full_name", "")
         if name.startswith("Walk-in #"):
             try:
                 numbers.append(int(name.split("#")[1]))
@@ -202,8 +210,7 @@ def add_manual_passenger(
     queue_data = queue_ref.get().to_dict()
     ticket_number = queue_data.get("next_ticket", 1)
 
-    passenger_ref = passengers_ref.document(str(ticket_number))
-    passenger_ref.set(
+    passengers_ref.document(str(ticket_number)).set(
         {
             "user_id": walkin_name,
             "full_name": walkin_name,
@@ -225,4 +232,95 @@ def add_manual_passenger(
             "ticket_number": ticket_number,
             "added_by": uid,
         },
+    }
+
+
+@router.post("/{bus_id}/manual-add/privileged")
+def add_manual_privileged_passenger(
+    bus_id: str,
+    body: PrivilegedAddRequest,
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+    bus_service: BusService = Depends(get_bus_service),
+):
+    bus_ref = bus_service.db.collection("buses").document(bus_id)
+    bus_snapshot = bus_ref.get()
+
+    if not bus_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Bus not found")
+
+    bus = bus_snapshot.to_dict()
+    queue_id = bus.get("current_queue_id")
+
+    if not queue_id:
+        raise HTTPException(status_code=400, detail="No active queue for this bus")
+
+    capacity = bus.get("capacity", 0)
+    priority_limit = bus.get("priority_seat", 0)
+
+    queue_ref = bus_service.db.collection("queues").document(queue_id)
+    passengers_ref = queue_ref.collection("passengers")
+
+    passengers = [p.to_dict() for p in passengers_ref.stream()]
+    total_boarded = len(passengers)
+    privileged_boarded = sum(1 for p in passengers if p.get("is_privileged"))
+
+    if total_boarded >= capacity:
+        raise HTTPException(status_code=400, detail="Bus capacity reached")
+
+    if priority_limit == 0 and not body.force:
+        return {
+            "success": False,
+            "code": "NO_PRIORITY_SEATS",
+            "message": "This bus has no priority seats",
+            "can_force": True,
+        }
+
+    if privileged_boarded >= priority_limit and not body.force:
+        return {
+            "success": False,
+            "code": "PRIORITY_SEATS_FULL",
+            "message": "No more priority seats available",
+            "can_force": True,
+        }
+
+    numbers = []
+    for p in passengers:
+        name = p.get("full_name", "")
+        if name.startswith("Priority Walk-in #"):
+            try:
+                numbers.append(int(name.split("#")[1]))
+            except:
+                continue
+
+    next_number = max(numbers, default=0) + 1
+    if next_number > 9999:
+        next_number = 1
+
+    walkin_name = f"Priority Walk-in #{next_number:04d}"
+
+    queue_data = queue_ref.get().to_dict()
+    ticket_number = queue_data.get("next_ticket", 1)
+
+    passengers_ref.document(str(ticket_number)).set(
+        {
+            "user_id": walkin_name,
+            "full_name": walkin_name,
+            "status": "boarded",
+            "ticket_number": ticket_number,
+            "is_privileged": True,
+            "joined_at": firestore.SERVER_TIMESTAMP,
+            "added_by": uid,
+        }
+    )
+
+    queue_ref.update({"next_ticket": ticket_number + 1})
+
+    return {
+        "success": True,
+        "message": "Privileged passenger added",
+        "ticket_number": ticket_number,
+        "forced": body.force,
+        "remaining_priority_seats": max(priority_limit - privileged_boarded - 1, 0),
+        "remaining_capacity": capacity - total_boarded - 1,
     }

@@ -99,8 +99,16 @@ class QueueService:
 
         my_doc = docs[0]
         my_data = my_doc.to_dict()
-        # my_ticket = my_data["ticket_number"]
-        # is_privileged = my_data.get("is_privileged", False)
+
+        status = my_data.get("status")
+
+        if status != "waiting":
+            return {
+                "status": status,
+                "queue_number": None,
+                "ticket_number": my_data.get("ticket_number"),
+                "message": f"Passenger is already {status}",
+            }
 
         waiting_passengers = [
             p.to_dict()
@@ -116,7 +124,6 @@ class QueueService:
         priority_seat = queue_ref.get().to_dict().get("priority_seat", 5)
 
         seated_priorities = seniors[:priority_seat]
-
         rest = seniors[priority_seat:] + normals
         rest.sort(key=lambda p: p["ticket_number"])
 
@@ -124,9 +131,11 @@ class QueueService:
 
         queue_map = {p["user_id"]: idx + 1 for idx, p in enumerate(full_queue)}
 
-        my_data["queue_number"] = queue_map[uid]
-
-        return my_data
+        return {
+            "status": "waiting",
+            "queue_number": queue_map.get(uid),
+            "ticket_number": my_data.get("ticket_number"),
+        }
 
     def get_queues(self):
         queues_ref = self.db.collection("queues")

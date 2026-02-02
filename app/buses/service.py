@@ -441,7 +441,6 @@ class BusService:
         if passenger.get("status") == "boarded":
             raise HTTPException(status_code=400, detail="Passenger already boarded")
 
-        # DB updates
         passenger_ref.update(
             {
                 "status": "boarded",
@@ -458,7 +457,6 @@ class BusService:
 
         self.db.collection("profiles").document(user_id).update({"in_queue": False})
 
-        # WebSocket event
         await ws_manager.broadcast(
             queue_id,
             {
@@ -564,7 +562,6 @@ class BusService:
             }
         )
 
-        # 🔔 WebSocket broadcast: bus departed
         await ws_manager.broadcast(
             queue_id,
             {

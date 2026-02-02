@@ -10,17 +10,6 @@ class QueueService:
     def __init__(self, db: firestore.Client):
         self.db = db
 
-
-from fastapi import HTTPException
-from firebase_admin import firestore
-from app.core.ws_manager import ws_manager
-from app.core.ws_events import PASSENGER_QUEUED
-
-
-class QueueService:
-    def __init__(self, db: firestore.Client):
-        self.db = db
-
     async def join_queue(self, uid: str, queue_id: str):
         profile_ref = self.db.collection("profiles").document(uid)
         profile_snapshot = profile_ref.get()
@@ -75,10 +64,8 @@ class QueueService:
         transaction = self.db.transaction()
         ticket_number = transactional_update(transaction, queue_ref)
 
-        # 🔹 Update profile AFTER successful transaction
         profile_ref.set({"in_queue": True}, merge=True)
 
-        # 🔔 WebSocket broadcast (THIS IS THE KEY PART)
         await ws_manager.broadcast(
             queue_id,
             {
@@ -110,7 +97,6 @@ class QueueService:
 
         queue_ref = self.db.collection("queues").document(queue_id)
 
-        # 🔹 Fetch passenger doc to get ticket_number for WS
         passenger_data = {}
 
         @firestore.transactional
@@ -132,10 +118,8 @@ class QueueService:
         transaction = self.db.transaction()
         transactional_update(transaction, queue_ref)
 
-        # Update profile after successful transaction
         profile_ref.set({"in_queue": False}, merge=True)
 
-        # 🔔 WebSocket broadcast
         await ws_manager.broadcast(
             queue_id,
             {

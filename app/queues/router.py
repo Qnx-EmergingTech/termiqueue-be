@@ -107,7 +107,7 @@ async def queue_ws(websocket: WebSocket, queue_id: str):
     await ws_manager.connect(queue_id, websocket)
     try:
         while True:
-            # Keep connection alive
+
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(queue_id, websocket)

@@ -7,6 +7,7 @@ from app.queues.schema import CreateQueueInfo, GeofenceCheck, QueueInfoResponse
 from app.core.qr_service import QRService
 from datetime import datetime, timezone
 from app.core.ws_manager import ws_manager
+import asyncio
 
 router = APIRouter(prefix="/queues", tags=["queues"])
 
@@ -107,7 +108,6 @@ async def queue_ws(websocket: WebSocket, queue_id: str):
     await ws_manager.connect(queue_id, websocket)
     try:
         while True:
-
-            await websocket.receive_text()
+            await asyncio.sleep(3600)
     except WebSocketDisconnect:
         ws_manager.disconnect(queue_id, websocket)

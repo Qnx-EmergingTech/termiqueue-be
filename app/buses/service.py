@@ -4,6 +4,9 @@ from datetime import datetime
 from app.core.geolocation_service import GeolocationService
 from app.core.notification_service import NotificationService
 from firebase_admin import firestore
+from app.core.ws_manager import ws_manager
+from app.core.ws_events import PASSENGER_BOARDED
+from app.core.ws_events import BUS_DEPARTED
 
 
 class BusService:
@@ -397,7 +400,7 @@ class BusService:
             "queue_id": queue_id,
         }
 
-    def scan_qr_and_board(self, bus_id: str, payload: dict, queue_service):
+    async def scan_qr_and_board(self, bus_id: str, payload: dict, queue_service):
         user_id = payload.get("user_id")
         full_name = payload.get("full_name")
         queue_id = payload.get("queue_id")
@@ -416,8 +419,7 @@ class BusService:
         if bus.get("attendant_id") is None:
             raise HTTPException(status_code=403, detail="Bus has no assigned attendant")
 
-        current_queue_id = bus.get("current_queue_id")
-        if current_queue_id != queue_id:
+        if bus.get("current_queue_id") != queue_id:
             raise HTTPException(
                 status_code=400, detail="Passenger belongs to a different queue"
             )
@@ -439,6 +441,7 @@ class BusService:
         if passenger.get("status") == "boarded":
             raise HTTPException(status_code=400, detail="Passenger already boarded")
 
+        # DB updates
         passenger_ref.update(
             {
                 "status": "boarded",
@@ -453,21 +456,26 @@ class BusService:
             }
         )
 
-        profile_ref = self.db.collection("profiles").document(user_id)
-        profile_ref.update({"in_queue": False})
+        self.db.collection("profiles").document(user_id).update({"in_queue": False})
 
-        return {
-            "message": "Passenger boarded successfully",
-            "passenger": {
-                "user_id": user_id,
-                "full_name": full_name,
-                "ticket_number": ticket_number,
-                "is_privileged": passenger.get("is_privileged", False),
-                "status": "boarded",
+        # WebSocket event
+        await ws_manager.broadcast(
+            queue_id,
+            {
+                "type": PASSENGER_BOARDED,
+                "payload": {
+                    "user_id": user_id,
+                    "full_name": full_name,
+                    "ticket_number": ticket_number,
+                    "status": "boarded",
+                    "is_privileged": passenger.get("is_privileged", False),
+                },
             },
-        }
+        )
 
-    def mark_bus_departure(self, bus_id: str, uid: str):
+        return {"message": "Passenger boarded successfully"}
+
+    async def mark_bus_departure(self, bus_id: str, uid: str):
         bus_ref = self.db.collection("buses").document(bus_id)
         bus_snapshot = bus_ref.get()
 
@@ -554,6 +562,21 @@ class BusService:
                 "last_proximity_notification_sent": None,
                 "updated_at": firestore.SERVER_TIMESTAMP,
             }
+        )
+
+        # 🔔 WebSocket broadcast: bus departed
+        await ws_manager.broadcast(
+            queue_id,
+            {
+                "type": BUS_DEPARTED,
+                "payload": {
+                    "bus_id": bus_id,
+                    "departed_at": datetime.utcnow().isoformat(),
+                    "boarded_passengers_removed": deleted_count,
+                    "remaining_waiting_passengers": waiting_count,
+                    "queue_status": "done" if waiting_count == 0 else "waiting",
+                },
+            },
         )
 
         return {

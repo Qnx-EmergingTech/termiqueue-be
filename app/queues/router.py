@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
-from firebase_admin import firestore
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from firebase_admin import firestore, auth
 from app.core.geolocation_service import GeolocationService
 from app.core.dependencies import get_firestore, verify_token
 from app.queues.service import QueueService
 from app.queues.schema import CreateQueueInfo, GeofenceCheck, QueueInfoResponse
 from app.core.qr_service import QRService
 from datetime import datetime, timezone
+from app.core.ws_manager import ws_manager
 
 router = APIRouter(prefix="/queues", tags=["queues"])
 
@@ -44,26 +45,22 @@ def check_geofence(
 
 
 @router.post("/{queue_id}/join")
-def join_queue(
+async def join_queue(
     queue_id: str,
     queue_service: QueueService = Depends(get_queue_service),
     uid: str = Depends(verify_token),
 ):
-    ticket_number = queue_service.join_queue(uid, queue_id)
-    return {
-        "message": "User has joined the queue successfully.",
-        "ticket_number": ticket_number,
-    }
+    result = await queue_service.join_queue(uid, queue_id)
+    return result
 
 
 @router.post("/{queue_id}/leave")
-def leave_queue(
+async def leave_queue(
     queue_id: str,
     queue_service: QueueService = Depends(get_queue_service),
     uid: str = Depends(verify_token),
 ):
-    queue_service.leave_queue(uid, queue_id)
-    return {"message": "User has left the queue successfully."}
+    return await queue_service.leave_queue(uid, queue_id)
 
 
 @router.get("/{queue_id}/me/status")
@@ -103,3 +100,14 @@ def get_my_qr_code(
     qr_b64 = qr_service.generate_qr_base64(payload)
 
     return {"qr_base64": qr_b64, "message": "QR code generated successfully."}
+
+
+@router.websocket("/ws/queues/{queue_id}")
+async def queue_ws(websocket: WebSocket, queue_id: str):
+    await ws_manager.connect(queue_id, websocket)
+    try:
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(queue_id, websocket)

@@ -1,21 +1,25 @@
 from fastapi import HTTPException
 from firebase_admin import firestore
 from typing import Optional
+from app.core.ws_manager import ws_manager
+from app.core.ws_events import PASSENGER_QUEUED
+from app.core.ws_events import PASSENGER_LEFT
 
 
 class QueueService:
     def __init__(self, db: firestore.Client):
         self.db = db
 
-    def join_queue(self, uid: str, queue_id: str):
+    async def join_queue(self, uid: str, queue_id: str):
         profile_ref = self.db.collection("profiles").document(uid)
         profile_snapshot = profile_ref.get()
+
         if not profile_snapshot.exists:
             raise HTTPException(status_code=404, detail="Profile not found")
 
         profile_data = profile_snapshot.to_dict()
 
-        if profile_data.get("in_queue", True):
+        if profile_data.get("in_queue"):
             raise HTTPException(status_code=400, detail="User already in queue")
 
         is_privileged = profile_data.get("is_privileged", False)
@@ -48,15 +52,40 @@ class QueueService:
                     "joined_at": firestore.SERVER_TIMESTAMP,
                 },
             )
-            transaction.set(queue_ref, {"next_ticket": next_ticket + 1}, merge=True)
+
+            transaction.set(
+                queue_ref,
+                {"next_ticket": next_ticket + 1},
+                merge=True,
+            )
+
             return next_ticket
 
         transaction = self.db.transaction()
         ticket_number = transactional_update(transaction, queue_ref)
-        profile_ref.set({"in_queue": True}, merge=True)
-        return ticket_number
 
-    def leave_queue(self, uid: str, queue_id: str):
+        profile_ref.set({"in_queue": True}, merge=True)
+
+        await ws_manager.broadcast(
+            queue_id,
+            {
+                "type": PASSENGER_QUEUED,
+                "payload": {
+                    "user_id": uid,
+                    "full_name": full_name,
+                    "ticket_number": ticket_number,
+                    "is_privileged": is_privileged,
+                    "status": "waiting",
+                },
+            },
+        )
+
+        return {
+            "ticket_number": ticket_number,
+            "message": "Successfully joined queue",
+        }
+
+    async def leave_queue(self, uid: str, queue_id: str):
         profile_ref = self.db.collection("profiles").document(uid)
         profile_snapshot = profile_ref.get()
         if not profile_snapshot.exists:
@@ -67,6 +96,8 @@ class QueueService:
             raise HTTPException(status_code=400, detail="User is not in a queue")
 
         queue_ref = self.db.collection("queues").document(queue_id)
+
+        passenger_data = {}
 
         @firestore.transactional
         def transactional_update(transaction, queue_ref):
@@ -80,6 +111,8 @@ class QueueService:
                 )
 
             passenger_doc = docs[0].reference
+            nonlocal passenger_data
+            passenger_data = docs[0].to_dict()
             transaction.delete(passenger_doc)
 
         transaction = self.db.transaction()
@@ -87,7 +120,20 @@ class QueueService:
 
         profile_ref.set({"in_queue": False}, merge=True)
 
-        return True
+        await ws_manager.broadcast(
+            queue_id,
+            {
+                "type": PASSENGER_LEFT,
+                "payload": {
+                    "user_id": uid,
+                    "full_name": passenger_data.get("full_name"),
+                    "ticket_number": passenger_data.get("ticket_number"),
+                    "status": "left",
+                },
+            },
+        )
+
+        return {"message": "User left the queue successfully"}
 
     def get_queue_status(self, uid: str, queue_id: str):
         queue_ref = self.db.collection("queues").document(queue_id)

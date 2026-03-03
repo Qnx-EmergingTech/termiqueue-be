@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from firebase_admin import firestore, auth
 from app.core.geolocation_service import GeolocationService
-from app.core.dependencies import get_firestore, verify_token
+from app.core.dependencies import get_firestore, verify_token, require_bus_attendant
 from app.queues.service import QueueService
 from app.queues.schema import CreateQueueInfo, GeofenceCheck, QueueInfoResponse
 from app.core.qr_service import QRService
@@ -111,3 +111,18 @@ async def queue_ws(websocket: WebSocket, queue_id: str):
             await asyncio.sleep(3600)
     except WebSocketDisconnect:
         ws_manager.disconnect(queue_id, websocket)
+
+
+@router.post("/{queue_id}/force-remove-passenger")
+async def force_remove_passenger(
+    queue_id: str,
+    passenger_id: str,
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+    queue_service: QueueService = Depends(get_queue_service),
+):
+    return await queue_service.force_remove_passenger(
+        uid,
+        queue_id,
+        passenger_id,
+    )

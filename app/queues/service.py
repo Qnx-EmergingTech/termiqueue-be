@@ -225,3 +225,51 @@ class QueueService:
             data["ticket_number"] = doc.id
 
         return data
+
+    async def force_remove_passenger(
+        self,
+        attendant_uid: str,
+        queue_id: str,
+        passenger_id: str,
+    ):
+        queue_ref = self.db.collection("queues").document(queue_id)
+        passengers_ref = queue_ref.collection("passengers")
+
+        docs = list(
+            passengers_ref.where("user_id", "==", passenger_id).limit(1).stream()
+        )
+
+        if not docs:
+            raise HTTPException(
+                status_code=404,
+                detail="Passenger not found in this queue",
+            )
+
+        passenger_doc = docs[0]
+        passenger_data = passenger_doc.to_dict() or {}
+        passenger_ref = passenger_doc.reference
+        passenger_ref.delete()
+        profile_ref = self.db.collection("profiles").document(passenger_id)
+        profile_snapshot = profile_ref.get()
+
+        if profile_snapshot.exists:
+            profile_ref.set({"in_queue": False}, merge=True)
+
+        await ws_manager.broadcast(
+            queue_id,
+            {
+                "type": PASSENGER_LEFT,
+                "payload": {
+                    "user_id": passenger_id,
+                    "full_name": passenger_data.get("full_name"),
+                    "ticket_number": passenger_data.get("ticket_number"),
+                    "status": "force_removed",
+                    "removed_by": attendant_uid,
+                },
+            },
+        )
+        return {
+            "success": True,
+            "message": "Passenger force removed successfully",
+            "ticket_number": passenger_data.get("ticket_number"),
+        }

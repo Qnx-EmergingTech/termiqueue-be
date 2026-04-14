@@ -11,6 +11,8 @@ class QueueService:
         self.db = db
 
     async def join_queue(self, uid: str, queue_id: str):
+        MAX_PASSENGERS = 22
+
         profile_ref = self.db.collection("profiles").document(uid)
         profile_snapshot = profile_ref.get()
 
@@ -37,9 +39,17 @@ class QueueService:
             data = snapshot.to_dict() or {}
             next_ticket = data.get("next_ticket", 1)
 
-            passenger_ref = queue_ref.collection("passengers").document(
-                str(next_ticket)
-            )
+            passengers_ref = queue_ref.collection("passengers")
+
+            passengers = list(passengers_ref.stream())
+
+            if len(passengers) >= MAX_PASSENGERS:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Queue is full (maximum 22 passengers)",
+                )
+
+            passenger_ref = passengers_ref.document(str(next_ticket))
 
             transaction.set(
                 passenger_ref,

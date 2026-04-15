@@ -11,7 +11,7 @@ class QueueService:
         self.db = db
 
     async def join_queue(self, uid: str, queue_id: str):
-        MAX_PASSENGERS = 22
+        MAX_PASSENGERS = 21
 
         profile_ref = self.db.collection("profiles").document(uid)
         profile_snapshot = profile_ref.get()

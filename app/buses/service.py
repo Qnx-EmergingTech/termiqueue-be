@@ -474,6 +474,8 @@ class BusService:
         return {"message": "Passenger boarded successfully"}
 
     async def mark_bus_departure(self, bus_id: str, uid: str):
+        MIN_PASSENGERS = 5
+
         bus_ref = self.db.collection("buses").document(bus_id)
         bus_snapshot = bus_ref.get()
 
@@ -496,9 +498,15 @@ class BusService:
 
         queue_ref = self.db.collection("queues").document(queue_id)
 
-        boarded_passengers = (
+        boarded_passengers = list(
             queue_ref.collection("passengers").where("status", "==", "boarded").stream()
         )
+
+        if len(boarded_passengers) < MIN_PASSENGERS:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot start trip. Minimum 5 passengers required.",
+            )
 
         batch = self.db.batch()
         now = firestore.SERVER_TIMESTAMP

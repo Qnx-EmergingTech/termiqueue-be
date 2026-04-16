@@ -324,3 +324,22 @@ def add_manual_privileged_passenger(
         "remaining_priority_seats": max(priority_limit - privileged_boarded - 1, 0),
         "remaining_capacity": capacity - total_boarded - 1,
     }
+
+
+@router.get("/attendant/trips")
+def get_attendant_trips(
+    bus_service: BusService = Depends(get_bus_service),
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+):
+    return bus_service.get_attendant_trip_history(uid)
+
+
+@router.get("/attendant/trips/{trip_id}")
+def get_attendant_trip_detail(
+    trip_id: str,
+    bus_service: BusService = Depends(get_bus_service),
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+):
+    return bus_service.get_attendant_trip_detail(uid, trip_id)

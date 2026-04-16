@@ -527,6 +527,7 @@ class BusService:
                     "user_id": user_id,
                     "full_name": passenger.get("full_name"),
                     "bus_id": bus_id,
+                    "attendant_id": uid,
                     "bus_number": bus.get("bus_number"),
                     "plate_number": bus.get("plate_number"),
                     "origin": bus.get("origin"),
@@ -666,23 +667,14 @@ class BusService:
         }
 
     def get_attendant_trip_history(self, uid: str):
-        # get buses handled by this attendant
-        buses = self.db.collection("buses").where("attendant_id", "==", uid).stream()
-
-        bus_ids = [b.id for b in buses]
-
-        if not bus_ids:
-            return {"trips": []}
-
-        trips_query = self.db.collection("trips").stream()
+        trips_query = (
+            self.db.collection("trips").where("attendant_id", "==", uid).stream()
+        )
 
         grouped = {}
 
         for doc in trips_query:
             data = doc.to_dict()
-
-            if data.get("bus_id") not in bus_ids:
-                continue
 
             key = f"{data.get('bus_id')}_{data.get('departed_at')}"
 
@@ -709,25 +701,13 @@ class BusService:
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid trip_id format")
 
-        # verify attendant owns this bus
-        bus_ref = self.db.collection("buses").document(bus_id)
-        bus_snapshot = bus_ref.get()
-
-        if not bus_snapshot.exists:
-            raise HTTPException(status_code=404, detail="Bus not found")
-
-        bus = bus_snapshot.to_dict()
-
-        if bus.get("attendant_id") != uid:
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        # 🔥 FIX: use range query instead of equality
         start = departed_at
         end = departed_at + timedelta(seconds=1)
 
         trips_query = (
             self.db.collection("trips")
-            .where("bus_id", "==", bus_id)
+            .where("attendant_id", "==", uid)
+            .where("bus_id", "==", bus_id)  # keep this for safety
             .where("departed_at", ">=", start)
             .where("departed_at", "<", end)
             .stream()
@@ -743,18 +723,23 @@ class BusService:
                     "user_id": data.get("user_id"),
                     "ticket_number": data.get("ticket_number"),
                     "boarded_at": data.get("boarded_at"),
-                    "is_privileged": data.get("is_privileged", False),
                     "full_name": data.get("full_name"),
                 }
             )
 
+        if not passengers:
+            raise HTTPException(status_code=404, detail="Trip not found")
+
+        first = passengers[0]
+
         return {
             "trip_id": trip_id,
             "bus_id": bus_id,
-            "bus_number": bus.get("bus_number"),
-            "plate_number": bus.get("plate_number"),
-            "origin": bus.get("origin"),
-            "destination": bus.get("destination"),
+            "bus_number": data.get("bus_number"),
+            "plate_number": data.get("plate_number"),
+            "origin": data.get("origin"),
+            "destination": data.get("destination"),
+            "departed_at": data.get("departed_at"),
             "passenger_count": len(passengers),
             "passengers": passengers,
         }

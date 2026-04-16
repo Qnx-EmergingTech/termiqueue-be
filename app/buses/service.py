@@ -707,7 +707,7 @@ class BusService:
         trips_query = (
             self.db.collection("trips")
             .where("attendant_id", "==", uid)
-            .where("bus_id", "==", bus_id)  # keep this for safety
+            .where("bus_id", "==", bus_id)
             .where("departed_at", ">=", start)
             .where("departed_at", "<", end)
             .stream()

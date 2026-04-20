@@ -1,6 +1,8 @@
 from fastapi import HTTPException
 from firebase_admin import firestore
 from typing import Optional
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from app.core.ws_manager import ws_manager
 from app.core.ws_events import PASSENGER_QUEUED
 from app.core.ws_events import PASSENGER_LEFT
@@ -37,7 +39,14 @@ class QueueService:
         def transactional_update(transaction, queue_ref):
             snapshot = queue_ref.get(transaction=transaction)
             data = snapshot.to_dict() or {}
+
+            today = datetime.now(ZoneInfo("Asia/Manila")).date().isoformat()
+
+            last_reset_date = data.get("last_reset_date")
             next_ticket = data.get("next_ticket", 1)
+
+            if last_reset_date != today:
+                next_ticket = 1
 
             passengers_ref = queue_ref.collection("passengers")
 
@@ -65,7 +74,10 @@ class QueueService:
 
             transaction.set(
                 queue_ref,
-                {"next_ticket": next_ticket + 1},
+                {
+                    "next_ticket": next_ticket + 1,
+                    "last_reset_date": today,
+                },
                 merge=True,
             )
 

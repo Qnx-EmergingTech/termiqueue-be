@@ -55,7 +55,7 @@ class QueueService:
             if len(passengers) >= MAX_PASSENGERS:
                 raise HTTPException(
                     status_code=400,
-                    detail="Queue is full (maximum 22 passengers)",
+                    detail="This trip is already full. Please wait for the next trip schedule.",
                 )
 
             passenger_ref = passengers_ref.document(str(next_ticket))

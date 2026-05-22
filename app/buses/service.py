@@ -474,7 +474,7 @@ class BusService:
         return {"message": "Passenger boarded successfully"}
 
     async def mark_bus_departure(self, bus_id: str, uid: str):
-        MIN_PASSENGERS = 3
+        MIN_PASSENGERS = 5
 
         bus_ref = self.db.collection("buses").document(bus_id)
         bus_snapshot = bus_ref.get()
@@ -633,7 +633,9 @@ class BusService:
 
         bus_ref.update(
             {
-                "status": "active",
+                "status": "available",
+                "attendant_id": None,
+                "attendant_name": None,
                 "finished_at": now,
                 "updated_at": firestore.SERVER_TIMESTAMP,
             }

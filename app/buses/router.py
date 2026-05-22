@@ -147,6 +147,16 @@ async def depart_bus(
     return await bus_service.mark_bus_departure(bus_id, uid)
 
 
+@router.post("/{bus_id}/finish-trip")
+def finish_trip(
+    bus_id: str,
+    bus_service: BusService = Depends(get_bus_service),
+    uid: str = Depends(verify_token),
+    attendant_profile: dict = Depends(require_bus_attendant),
+):
+    return bus_service.finish_trip(bus_id, uid)
+
+
 @router.get("/attendant/passengers")
 def get_passenger_list(
     bus_service: BusService = Depends(get_bus_service),

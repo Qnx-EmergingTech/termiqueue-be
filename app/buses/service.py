@@ -537,6 +537,7 @@ class BusService:
                     "is_privileged": passenger.get("is_privileged", False),
                     "boarded_at": passenger.get("boarded_at"),
                     "departed_at": now,
+                    "finished_at": None,
                     "created_at": now,
                 },
             )
@@ -593,6 +594,55 @@ class BusService:
             "boarded_passengers_removed": deleted_count,
             "remaining_waiting_passengers": waiting_count,
             "queue_status": "done" if waiting_count == 0 else "waiting",
+        }
+
+    def finish_trip(self, bus_id: str, uid: str):
+        bus_ref = self.db.collection("buses").document(bus_id)
+        bus_snapshot = bus_ref.get()
+
+        if not bus_snapshot.exists:
+            raise HTTPException(status_code=404, detail="Bus not found")
+
+        bus = bus_snapshot.to_dict()
+
+        if bus.get("attendant_id") != uid:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not the assigned attendant for this bus",
+            )
+
+        if bus.get("status") != "in_transit":
+            raise HTTPException(
+                status_code=400,
+                detail="Bus is not in transit",
+            )
+
+        now = datetime.utcnow()
+
+        trips = self.db.collection("trips").where("bus_id", "==", bus_id).stream()
+
+        batch = self.db.batch()
+
+        for trip in trips:
+            if trip.to_dict().get("finished_at") is None:
+                batch.update(trip.reference, {"finished_at": now})
+
+        bus_ref.update(
+            {
+                "status": "available",
+                "attendant_id": None,
+                "attendant_name": None,
+                "finished_at": now,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+
+        batch.commit()
+
+        return {
+            "message": "Trip finished successfully",
+            "bus_id": bus_id,
+            "finished_at": now.isoformat(),
         }
 
     def get_attendant_passenger_list(self, uid: str, queue_service):
@@ -687,6 +737,7 @@ class BusService:
                     "origin": data.get("origin"),
                     "destination": data.get("destination"),
                     "departed_at": data.get("departed_at"),
+                    "finished_at": data.get("finished_at"),
                     "passenger_count": 0,
                 }
 
@@ -740,6 +791,7 @@ class BusService:
             "origin": data.get("origin"),
             "destination": data.get("destination"),
             "departed_at": data.get("departed_at"),
+            "finished_at": data.get("finished_at"),
             "passenger_count": len(passengers),
             "passengers": passengers,
         }

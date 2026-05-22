@@ -619,11 +619,7 @@ class BusService:
 
         now = datetime.utcnow()
 
-        trips = (
-            self.db.collection("trips")
-            .where("bus_id", "==", bus_id)
-            .stream()
-        )
+        trips = self.db.collection("trips").where("bus_id", "==", bus_id).stream()
 
         batch = self.db.batch()
 

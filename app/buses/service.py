@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 from firebase_admin import firestore
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core.geolocation_service import GeolocationService
 from app.core.notification_service import NotificationService
 from firebase_admin import firestore
@@ -109,6 +109,21 @@ class BusService:
         updated_bus = bus_ref.get().to_dict()
         return self._convert_geopoint_to_location(updated_bus)
 
+    def _is_under_coding(self, plate_number: str) -> bool:
+        coding_schedule = {
+            0: {"1", "2"},  # Monday
+            1: {"3", "4"},  # Tuesday
+            2: {"5", "6"},  # Wednesday
+            3: {"7", "8"},  # Thursday
+            4: {"9", "0"},  # Friday
+        }
+        ph_tz = timezone(timedelta(hours=8))
+        today = datetime.now(ph_tz).weekday()
+        if today not in coding_schedule:
+            return False
+        last_digit = plate_number.strip()[-1]
+        return last_digit in coding_schedule[today]
+
     def claim_bus(self, bus_id: str, uid: str, attendant_profile):
         bus_ref = self.db.collection("buses").document(bus_id)
         bus_snapshot = bus_ref.get()
@@ -128,6 +143,12 @@ class BusService:
             raise HTTPException(
                 status_code=400,
                 detail=f"Bus is not available. Current status: {bus_data.get('status')}",
+            )
+
+        if self._is_under_coding(bus_data.get("plate_number", "")):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Bus {bus_data.get('bus_name')} with plate number {bus_data.get('plate_number')} is under coding today and cannot be claimed.",
             )
 
         attendant_name = f"{attendant_profile.get('first_name')} {attendant_profile.get('last_name')}"

@@ -22,9 +22,15 @@ class QueueService:
             raise HTTPException(status_code=404, detail="Profile not found")
 
         profile_data = profile_snapshot.to_dict()
+        today = datetime.now(ZoneInfo("Asia/Manila")).date().isoformat()
 
         if profile_data.get("in_queue"):
-            raise HTTPException(status_code=400, detail="User already in queue")
+            in_queue_date = profile_data.get("in_queue_date")
+            if in_queue_date != today:
+                profile_ref.set({"in_queue": False, "in_queue_date": None}, merge=True)
+                profile_data["in_queue"] = False
+            else:
+                raise HTTPException(status_code=400, detail="User already in queue")
 
         is_privileged = profile_data.get("is_privileged", False)
         first_name = profile_data.get("first_name")
@@ -34,13 +40,25 @@ class QueueService:
         full_name = " ".join(p for p in [first_name, middle_name, last_name] if p)
 
         queue_ref = self.db.collection("queues").document(queue_id)
+        passengers_ref = queue_ref.collection("passengers")
+
+        queue_snapshot = queue_ref.get()
+        queue_data = queue_snapshot.to_dict() or {}
+        prev_reset_date = queue_data.get("last_reset_date")
+
+        stale_user_ids = []
+        if prev_reset_date != today:
+            stale_docs = list(passengers_ref.stream())
+            stale_user_ids = [
+                p.to_dict().get("user_id")
+                for p in stale_docs
+                if p.to_dict().get("user_id") and p.to_dict().get("user_id") != uid
+            ]
 
         @firestore.transactional
         def transactional_update(transaction, queue_ref):
             snapshot = queue_ref.get(transaction=transaction)
             data = snapshot.to_dict() or {}
-
-            today = datetime.now(ZoneInfo("Asia/Manila")).date().isoformat()
 
             last_reset_date = data.get("last_reset_date")
             next_ticket = data.get("next_ticket", 1)
@@ -48,9 +66,12 @@ class QueueService:
             if last_reset_date != today:
                 next_ticket = 1
 
-            passengers_ref = queue_ref.collection("passengers")
-
             passengers = list(passengers_ref.stream())
+
+            if last_reset_date != today:
+                for p in passengers:
+                    transaction.delete(p.reference)
+                passengers = []
 
             if len(passengers) >= MAX_PASSENGERS:
                 raise HTTPException(
@@ -86,7 +107,16 @@ class QueueService:
         transaction = self.db.transaction()
         ticket_number = transactional_update(transaction, queue_ref)
 
-        profile_ref.set({"in_queue": True}, merge=True)
+        if stale_user_ids:
+            batch = self.db.batch()
+            for user_id in stale_user_ids:
+                profile = self.db.collection("profiles").document(user_id)
+                batch.set(
+                    profile, {"in_queue": False, "in_queue_date": None}, merge=True
+                )
+            batch.commit()
+
+        profile_ref.set({"in_queue": True, "in_queue_date": today}, merge=True)
 
         await ws_manager.broadcast(
             queue_id,
@@ -140,7 +170,7 @@ class QueueService:
         transaction = self.db.transaction()
         transactional_update(transaction, queue_ref)
 
-        profile_ref.set({"in_queue": False}, merge=True)
+        profile_ref.set({"in_queue": False, "in_queue_date": None}, merge=True)
 
         await ws_manager.broadcast(
             queue_id,
@@ -275,7 +305,7 @@ class QueueService:
         profile_snapshot = profile_ref.get()
 
         if profile_snapshot.exists:
-            profile_ref.set({"in_queue": False}, merge=True)
+            profile_ref.set({"in_queue": False, "in_queue_date": None}, merge=True)
 
         await ws_manager.broadcast(
             queue_id,

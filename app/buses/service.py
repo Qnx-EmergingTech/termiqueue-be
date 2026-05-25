@@ -148,7 +148,7 @@ class BusService:
         if self._is_under_coding(bus_data.get("plate_number", "")):
             raise HTTPException(
                 status_code=403,
-                detail=f"Bus {bus_data.get('bus_name')} with plate number {bus_data.get('plate_number')} is under coding today and cannot be claimed.",
+                detail=f"Vehicle {bus_data.get('bus_name')} with plate number {bus_data.get('plate_number')} is under coding today and cannot be claimed.",
             )
 
         attendant_name = f"{attendant_profile.get('first_name')} {attendant_profile.get('last_name')}"
@@ -476,7 +476,9 @@ class BusService:
             }
         )
 
-        self.db.collection("profiles").document(user_id).update({"in_queue": False})
+        self.db.collection("profiles").document(user_id).update(
+            {"in_queue": False, "in_queue_date": None}
+        )
 
         await ws_manager.broadcast(
             queue_id,

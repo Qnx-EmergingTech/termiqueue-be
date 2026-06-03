@@ -54,6 +54,7 @@ class TripSummary(BaseModel):
     ticket_number: int
     boarded_at: datetime
     departed_at: datetime
+    finished_at: Optional[datetime] = None
 
 
 class TripHistoryResponse(BaseModel):

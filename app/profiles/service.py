@@ -26,6 +26,7 @@ class ProfileService:
                     "ticket_number": data.get("ticket_number"),
                     "boarded_at": data.get("boarded_at"),
                     "departed_at": data.get("departed_at"),
+                    "finished_at": data.get("finished_at"),
                 }
             )
 
@@ -53,4 +54,5 @@ class ProfileService:
             "ticket_number": data.get("ticket_number"),
             "boarded_at": data.get("boarded_at"),
             "departed_at": data.get("departed_at"),
+            "finished_at": data.get("finished_at"),
         }

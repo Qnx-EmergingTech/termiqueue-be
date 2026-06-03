@@ -497,7 +497,7 @@ class BusService:
         return {"message": "Passenger boarded successfully"}
 
     async def mark_bus_departure(self, bus_id: str, uid: str):
-        MIN_PASSENGERS = 5
+        MIN_PASSENGERS = 3
 
         bus_ref = self.db.collection("buses").document(bus_id)
         bus_snapshot = bus_ref.get()
@@ -531,65 +531,10 @@ class BusService:
                 detail="Cannot start trip. Minimum 5 passengers required.",
             )
 
-        batch = self.db.batch()
-        now = firestore.SERVER_TIMESTAMP
-        deleted_count = 0
-
-        for p in boarded_passengers:
-            passenger = p.to_dict()
-            user_id = passenger.get("user_id")
-
-            if not user_id:
-                continue
-
-            trip_ref = self.db.collection("trips").document()
-
-            batch.set(
-                trip_ref,
-                {
-                    "user_id": user_id,
-                    "full_name": passenger.get("full_name"),
-                    "bus_id": bus_id,
-                    "attendant_id": uid,
-                    "bus_number": bus.get("bus_number"),
-                    "plate_number": bus.get("plate_number"),
-                    "origin": bus.get("origin"),
-                    "destination": bus.get("destination"),
-                    "queue_id": queue_id,
-                    "ticket_number": passenger.get("ticket_number"),
-                    "is_privileged": passenger.get("is_privileged", False),
-                    "boarded_at": passenger.get("boarded_at"),
-                    "departed_at": now,
-                    "finished_at": None,
-                    "created_at": now,
-                },
-            )
-
-            batch.delete(p.reference)
-            deleted_count += 1
-
-        if deleted_count > 0:
-            batch.commit()
-
-        waiting_passengers = (
-            queue_ref.collection("passengers").where("status", "==", "waiting").stream()
-        )
-
-        waiting_count = sum(1 for _ in waiting_passengers)
-
-        queue_ref.update(
-            {
-                "status": "done" if waiting_count == 0 else "waiting",
-                "remaining_passengers": waiting_count,
-                "bus_id": None,
-                "updated_at": firestore.SERVER_TIMESTAMP,
-            }
-        )
-
         bus_ref.update(
             {
                 "status": "in_transit",
-                "current_queue_id": None,
+                "departed_at": datetime.utcnow(),
                 "boarded_count": 0,
                 "last_proximity_notification_sent": None,
                 "updated_at": firestore.SERVER_TIMESTAMP,
@@ -603,9 +548,7 @@ class BusService:
                 "payload": {
                     "bus_id": bus_id,
                     "departed_at": datetime.utcnow().isoformat(),
-                    "boarded_passengers_removed": deleted_count,
-                    "remaining_waiting_passengers": waiting_count,
-                    "queue_status": "done" if waiting_count == 0 else "waiting",
+                    "boarded_count": len(boarded_passengers),
                 },
             },
         )
@@ -614,9 +557,7 @@ class BusService:
             "message": "Bus departure recorded",
             "bus_id": bus_id,
             "queue_id": queue_id,
-            "boarded_passengers_removed": deleted_count,
-            "remaining_waiting_passengers": waiting_count,
-            "queue_status": "done" if waiting_count == 0 else "waiting",
+            "boarded_count": len(boarded_passengers),
         }
 
     def finish_trip(self, bus_id: str, uid: str):
@@ -640,21 +581,72 @@ class BusService:
                 detail="Bus is not in transit",
             )
 
+        queue_id = bus.get("current_queue_id")
+        if not queue_id:
+            raise HTTPException(
+                status_code=400,
+                detail="No queue linked to this bus",
+            )
+
         now = datetime.utcnow()
 
-        trips = self.db.collection("trips").where("bus_id", "==", bus_id).stream()
+        queue_ref = self.db.collection("queues").document(queue_id)
+        passengers_ref = queue_ref.collection("passengers")
+
+        boarded_passengers = list(
+            passengers_ref.where("status", "==", "boarded").stream()
+        )
 
         batch = self.db.batch()
 
-        for trip in trips:
-            if trip.to_dict().get("finished_at") is None:
-                batch.update(trip.reference, {"finished_at": now})
+        for p in boarded_passengers:
+            passenger = p.to_dict()
+            user_id = passenger.get("user_id")
+
+            trip_ref = self.db.collection("trips").document()
+
+            batch.set(
+                trip_ref,
+                {
+                    "user_id": user_id,
+                    "full_name": passenger.get("full_name"),
+                    "bus_id": bus_id,
+                    "attendant_id": uid,
+                    "bus_number": bus.get("bus_number"),
+                    "plate_number": bus.get("plate_number"),
+                    "origin": bus.get("origin"),
+                    "destination": bus.get("destination"),
+                    "queue_id": queue_id,
+                    "ticket_number": passenger.get("ticket_number"),
+                    "is_privileged": passenger.get("is_privileged", False),
+                    "boarded_at": passenger.get("boarded_at"),
+                    "departed_at": bus.get("departed_at"),
+                    "finished_at": now,
+                    "created_at": now,
+                },
+            )
+
+            batch.delete(p.reference)
+
+        waiting_passengers = list(
+            passengers_ref.where("status", "==", "waiting").stream()
+        )
+        waiting_count = len(waiting_passengers)
+
+        queue_ref_update = {
+            "status": "done" if waiting_count == 0 else "waiting",
+            "remaining_passengers": waiting_count,
+            "bus_id": None,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+        batch.update(queue_ref, queue_ref_update)
 
         bus_ref.update(
             {
                 "status": "available",
                 "attendant_id": None,
                 "attendant_name": None,
+                "current_queue_id": None,
                 "finished_at": now,
                 "updated_at": firestore.SERVER_TIMESTAMP,
             }
@@ -665,7 +657,11 @@ class BusService:
         return {
             "message": "Trip finished successfully",
             "bus_id": bus_id,
+            "queue_id": queue_id,
             "finished_at": now.isoformat(),
+            "passengers_recorded": len(boarded_passengers),
+            "remaining_waiting_passengers": waiting_count,
+            "queue_status": "done" if waiting_count == 0 else "waiting",
         }
 
     def get_attendant_passenger_list(self, uid: str, queue_service):

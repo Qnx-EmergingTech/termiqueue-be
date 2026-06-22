@@ -4,3 +4,4 @@ pytest
 pytest-asyncio
 httpx
 qrcode[pil]
+prometheus-client>=0.20.0

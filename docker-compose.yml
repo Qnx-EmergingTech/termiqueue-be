@@ -1,4 +1,9 @@
 version: "3.9"
+
+networks:
+  termiq-net:
+    driver: bridge
+
 services:
   termiq-backend:
     build: .
@@ -12,3 +17,42 @@ services:
       - ./serviceAccountKey.json:/run/secrets/serviceAccountKey.json:ro
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/serviceAccountKey.json
+    networks:
+      - termiq-net
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: termiq-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    networks:
+      - termiq-net
+    depends_on:
+      - termiq-backend
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: termiq-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - termiq-net
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:

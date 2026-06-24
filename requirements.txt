@@ -4,3 +4,5 @@ pytest
 pytest-asyncio
 httpx
 qrcode[pil]
+loguru
+google-cloud-logging

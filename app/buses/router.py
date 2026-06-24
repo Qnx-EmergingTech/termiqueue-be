@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from firebase_admin import firestore
 from typing import List
+from loguru import logger
 from app.core.dependencies import get_firestore, verify_token, require_bus_attendant
 from app.buses.schema import (
     BusInfo,
@@ -29,6 +30,7 @@ def create_bus(
 ):
     bus_data = bus_info.dict()
     bus_id = bus_service.create_bus(bus_data)
+    logger.info(f"Bus created — bus_id={bus_id} plate={bus_data.get('plate_number')}")
     return {"id": bus_id, "message": "Bus info created successfully"}
 
 
@@ -36,14 +38,18 @@ def create_bus(
 def get_all_buses(
     bus_service: BusService = Depends(get_bus_service),
 ):
-    return bus_service.get_all_buses()
+    buses = bus_service.get_all_buses()
+    logger.info(f"All buses fetched — count={len(buses)}")
+    return buses
 
 
 @router.get("/available", response_model=List[BusInfoResponse])
 def get_available_buses(
     bus_service: BusService = Depends(get_bus_service),
 ):
-    return bus_service.get_available_buses()
+    buses = bus_service.get_available_buses()
+    logger.info(f"Available buses fetched — count={len(buses)}")
+    return buses
 
 
 @router.get("/{bus_id}", response_model=BusInfoResponse)
@@ -51,7 +57,9 @@ def get_bus(
     bus_id: str,
     bus_service: BusService = Depends(get_bus_service),
 ):
-    return bus_service.get_bus_by_id(bus_id)
+    bus = bus_service.get_bus_by_id(bus_id)
+    logger.info(f"Bus fetched — bus_id={bus_id}")
+    return bus
 
 
 @router.put("/{bus_id}", response_model=BusInfoResponse)
@@ -61,7 +69,9 @@ def update_bus(
     bus_service: BusService = Depends(get_bus_service),
 ):
     update_data = bus_update.to_update_dict()
-    return bus_service.update_bus(bus_id, update_data)
+    result = bus_service.update_bus(bus_id, update_data)
+    logger.info(f"Bus updated — bus_id={bus_id} fields={list(update_data.keys())}")
+    return result
 
 
 @router.post("/{bus_id}/claim", response_model=ClaimBusResponse)
@@ -90,7 +100,9 @@ def get_my_bus(
     uid: str = Depends(verify_token),
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
-    return bus_service.get_my_bus(uid)
+    bus = bus_service.get_my_bus(uid)
+    logger.info(f"My bus fetched — uid={uid} bus_id={bus.get('id')}")
+    return bus
 
 
 @router.post("/{bus_id}/arrive")
@@ -128,7 +140,10 @@ async def scan_qr_code(
 
     try:
         payload = qr_service.decrypt_token_wrapper(body.qr_json)
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            f"QR scan failed — invalid or tampered QR on bus_id={bus_id} by uid={uid}: {e}"
+        )
         raise HTTPException(status_code=400, detail="Invalid or tampered QR code")
 
     result = await bus_service.scan_qr_and_board(bus_id, payload, queue_service)
@@ -164,7 +179,11 @@ def get_passenger_list(
     uid: str = Depends(verify_token),
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
-    return bus_service.get_attendant_passenger_list(uid, queue_service)
+    result = bus_service.get_attendant_passenger_list(uid, queue_service)
+    logger.info(
+        f"Passenger list fetched — uid={uid} bus_id={result.get('bus_id')} total_onboard={result.get('total_onboard')}"
+    )
+    return result
 
 
 @router.post("/{bus_id}/manual-add")
@@ -175,20 +194,20 @@ def add_manual_passenger(
     bus_service: BusService = Depends(get_bus_service),
     queue_service: QueueService = Depends(lambda: QueueService(get_firestore())),
 ):
-    """
-    Adds a Walk-in passenger automatically to the current bus queue.
-    Ticket numbers loop back after trip completion.
-    """
     bus_ref = bus_service.db.collection("buses").document(bus_id)
     bus_snapshot = bus_ref.get()
 
     if not bus_snapshot.exists:
+        logger.warning(f"Manual add failed — bus not found bus_id={bus_id} uid={uid}")
         raise HTTPException(status_code=404, detail="Bus not found")
 
     bus = bus_snapshot.to_dict()
     queue_id = bus.get("current_queue_id")
 
     if not queue_id:
+        logger.warning(
+            f"Manual add failed — no active queue for bus_id={bus_id} uid={uid}"
+        )
         raise HTTPException(status_code=400, detail="No active queue for this bus")
 
     capacity = bus.get("capacity", 0)
@@ -200,6 +219,9 @@ def add_manual_passenger(
     total_boarded = len(passengers)
 
     if total_boarded >= capacity:
+        logger.warning(
+            f"Manual add failed — capacity reached bus_id={bus_id} capacity={capacity}"
+        )
         raise HTTPException(status_code=400, detail="Bus capacity reached")
 
     numbers = []
@@ -234,6 +256,9 @@ def add_manual_passenger(
 
     queue_ref.update({"next_ticket": ticket_number + 1})
 
+    logger.info(
+        f"Walk-in passenger added — {walkin_name} ticket=#{ticket_number} bus_id={bus_id} queue_id={queue_id} by uid={uid}"
+    )
     return {
         "message": "Walk-in passenger added",
         "passenger": {
@@ -257,12 +282,18 @@ def add_manual_privileged_passenger(
     bus_snapshot = bus_ref.get()
 
     if not bus_snapshot.exists:
+        logger.warning(
+            f"Privileged add failed — bus not found bus_id={bus_id} uid={uid}"
+        )
         raise HTTPException(status_code=404, detail="Bus not found")
 
     bus = bus_snapshot.to_dict()
     queue_id = bus.get("current_queue_id")
 
     if not queue_id:
+        logger.warning(
+            f"Privileged add failed — no active queue for bus_id={bus_id} uid={uid}"
+        )
         raise HTTPException(status_code=400, detail="No active queue for this bus")
 
     capacity = bus.get("capacity", 0)
@@ -276,9 +307,15 @@ def add_manual_privileged_passenger(
     privileged_boarded = sum(1 for p in passengers if p.get("is_privileged"))
 
     if total_boarded >= capacity:
+        logger.warning(
+            f"Privileged add failed — capacity reached bus_id={bus_id} capacity={capacity}"
+        )
         raise HTTPException(status_code=400, detail="Bus capacity reached")
 
     if priority_limit == 0 and not body.force:
+        logger.warning(
+            f"Privileged add failed — no priority seats on bus_id={bus_id} uid={uid}"
+        )
         return {
             "success": False,
             "code": "NO_PRIORITY_SEATS",
@@ -287,6 +324,9 @@ def add_manual_privileged_passenger(
         }
 
     if privileged_boarded >= priority_limit and not body.force:
+        logger.warning(
+            f"Privileged add failed — priority seats full bus_id={bus_id} privileged_boarded={privileged_boarded} limit={priority_limit}"
+        )
         return {
             "success": False,
             "code": "PRIORITY_SEATS_FULL",
@@ -326,6 +366,9 @@ def add_manual_privileged_passenger(
 
     queue_ref.update({"next_ticket": ticket_number + 1})
 
+    logger.info(
+        f"Privileged walk-in added — {walkin_name} ticket=#{ticket_number} bus_id={bus_id} queue_id={queue_id} forced={body.force} by uid={uid}"
+    )
     return {
         "success": True,
         "message": "Privileged passenger added",
@@ -342,7 +385,11 @@ def get_attendant_trips(
     uid: str = Depends(verify_token),
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
-    return bus_service.get_attendant_trip_history(uid)
+    result = bus_service.get_attendant_trip_history(uid)
+    logger.info(
+        f"Trip history fetched — uid={uid} count={len(result.get('trips', []))}"
+    )
+    return result
 
 
 @router.get("/attendant/trips/{trip_id}")
@@ -352,4 +399,6 @@ def get_attendant_trip_detail(
     uid: str = Depends(verify_token),
     attendant_profile: dict = Depends(require_bus_attendant),
 ):
-    return bus_service.get_attendant_trip_detail(uid, trip_id)
+    result = bus_service.get_attendant_trip_detail(uid, trip_id)
+    logger.info(f"Trip detail fetched — trip_id={trip_id} uid={uid}")
+    return result

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from firebase_admin import firestore, auth
+from loguru import logger
 from app.core.geolocation_service import GeolocationService
 from app.core.dependencies import get_firestore, verify_token, require_bus_attendant
 from app.queues.service import QueueService
@@ -19,6 +20,7 @@ def get_queue_service(db: firestore.Client = Depends(get_firestore)) -> QueueSer
 @router.get("/", response_model=list[QueueInfoResponse])
 def get_queues(queue_service: QueueService = Depends(get_queue_service)):
     queues = queue_service.get_queues()
+    logger.info(f"Queues fetched — count={len(queues)}")
     return queues
 
 
@@ -30,6 +32,9 @@ def create_terminal_queue(
     queue_id = queue_service.create_terminal_queue(
         queue_info.destination, queue_info.priority_seat
     )
+    logger.info(
+        f"Terminal queue created — queue_id={queue_id} destination={queue_info.destination} priority_seat={queue_info.priority_seat}"
+    )
     return {"message": "Terminal Queue created successfully.", "queue_id": queue_id}
 
 
@@ -39,9 +44,12 @@ def check_geofence(
     db: firestore.Client = Depends(get_firestore),
 ):
     geolocation_service = GeolocationService(db)
-    if geolocation_service.is_within_geofence(loc.lat, loc.lon):
+    within = geolocation_service.is_within_geofence(loc.lat, loc.lon)
+    if within:
+        logger.info(f"Geofence check — INSIDE lat={loc.lat} lon={loc.lon}")
         return {"can_join": True, "message": "User is within the geofence."}
     else:
+        logger.info(f"Geofence check — OUTSIDE lat={loc.lat} lon={loc.lon}")
         return {"can_join": False, "message": "User is outside the geofence."}
 
 
@@ -71,6 +79,9 @@ def get_queue_status(
     uid: str = Depends(verify_token),
 ):
     data = queue_service.get_queue_status(uid, queue_id)
+    logger.info(
+        f"Queue status fetched — uid={uid} queue_id={queue_id} status={data.get('status')} queue_number={data.get('queue_number')}"
+    )
     return data
 
 
@@ -83,7 +94,11 @@ def get_my_qr_code(
     passenger = queue_service.get_passenger(uid, queue_id)
     full_name = passenger.get("full_name")
     ticket_number = passenger.get("ticket_number")
+
     if ticket_number is None:
+        logger.error(
+            f"QR generation failed — missing ticket_number uid={uid} queue_id={queue_id}"
+        )
         raise HTTPException(
             status_code=500, detail="Passenger record missing ticket_number"
         )
@@ -100,17 +115,22 @@ def get_my_qr_code(
     qr_service = QRService()
     qr_b64 = qr_service.generate_qr_base64(payload)
 
+    logger.info(
+        f"QR code generated — uid={uid} queue_id={queue_id} ticket={ticket_number} full_name={full_name}"
+    )
     return {"qr_base64": qr_b64, "message": "QR code generated successfully."}
 
 
 @router.websocket("/ws/queues/{queue_id}")
 async def queue_ws(websocket: WebSocket, queue_id: str):
     await ws_manager.connect(queue_id, websocket)
+    logger.info(f"WebSocket connected — queue_id={queue_id}")
     try:
         while True:
             await asyncio.sleep(3600)
     except WebSocketDisconnect:
         ws_manager.disconnect(queue_id, websocket)
+        logger.info(f"WebSocket disconnected — queue_id={queue_id}")
 
 
 @router.post("/{queue_id}/force-remove-passenger")
@@ -121,8 +141,5 @@ async def force_remove_passenger(
     attendant_profile: dict = Depends(require_bus_attendant),
     queue_service: QueueService = Depends(get_queue_service),
 ):
-    return await queue_service.force_remove_passenger(
-        uid,
-        queue_id,
-        passenger_id,
-    )
+    result = await queue_service.force_remove_passenger(uid, queue_id, passenger_id)
+    return result

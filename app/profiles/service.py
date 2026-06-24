@@ -1,5 +1,6 @@
 from firebase_admin import firestore
 from fastapi import HTTPException
+from loguru import logger
 
 
 class ProfileService:
@@ -30,6 +31,7 @@ class ProfileService:
                 }
             )
 
+        logger.info(f"Trip history fetched for user_id={user_id} count={len(trips)}")
         return {"trips": trips}
 
     def get_trip_by_id(self, *, user_id: str, trip_id: str):
@@ -37,13 +39,20 @@ class ProfileService:
         snapshot = trip_ref.get()
 
         if not snapshot.exists:
+            logger.warning(
+                f"Trip not found trip_id={trip_id} requested by user_id={user_id}"
+            )
             raise HTTPException(status_code=404, detail="Trip not found")
 
         data = snapshot.to_dict()
 
         if data.get("user_id") != user_id:
+            logger.warning(
+                f"Access denied — trip_id={trip_id} does not belong to user_id={user_id}"
+            )
             raise HTTPException(status_code=403, detail="Access denied")
 
+        logger.info(f"Trip detail fetched trip_id={trip_id} for user_id={user_id}")
         return {
             "id": snapshot.id,
             "bus_id": data.get("bus_id"),

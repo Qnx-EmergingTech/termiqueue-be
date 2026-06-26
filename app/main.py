@@ -1,14 +1,18 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from app.core.tracing_middleware import TracingMiddleware
+from app.core.logger import setup_logging
 from app.profiles import router as profiles
 from app.queues import router as queues
 from app.buses import router as buses
 from app.geofence import router as geofence
 from app.deploy import router as deploy
-from app.core.logger import setup_logging
+from loguru import logger
 import time
 
-logger = setup_logging()
+setup_logging()
 
 app = FastAPI()
 
@@ -19,6 +23,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(TracingMiddleware)
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.middleware("http")

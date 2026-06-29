@@ -3,6 +3,7 @@ from firebase_admin import firestore
 from typing import Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from loguru import logger
 from app.core.ws_manager import ws_manager
 from app.core.ws_events import PASSENGER_QUEUED
 from app.core.ws_events import PASSENGER_LEFT
@@ -19,6 +20,9 @@ class QueueService:
         profile_snapshot = profile_ref.get()
 
         if not profile_snapshot.exists:
+            logger.warning(
+                f"Join queue failed — profile not found uid={uid} queue_id={queue_id}"
+            )
             raise HTTPException(status_code=404, detail="Profile not found")
 
         profile_data = profile_snapshot.to_dict()
@@ -29,7 +33,11 @@ class QueueService:
             if in_queue_date != today:
                 profile_ref.set({"in_queue": False, "in_queue_date": None}, merge=True)
                 profile_data["in_queue"] = False
+                logger.info(f"Stale in_queue flag reset — uid={uid}")
             else:
+                logger.warning(
+                    f"Join queue failed — uid={uid} already in queue={queue_id}"
+                )
                 raise HTTPException(status_code=400, detail="User already in queue")
 
         is_privileged = profile_data.get("is_privileged", False)
@@ -47,6 +55,14 @@ class QueueService:
         prev_reset_date = queue_data.get("last_reset_date")
 
         stale_user_ids = []
+
+        queue_snapshot = queue_ref.get()
+        if not queue_snapshot.exists:
+            logger.warning(
+                f"Join queue failed — queue_id={queue_id} does not exist uid={uid}"
+            )
+            raise HTTPException(status_code=404, detail="Queue not found")
+
         if prev_reset_date != today:
             stale_docs = list(passengers_ref.stream())
             stale_user_ids = [
@@ -54,6 +70,10 @@ class QueueService:
                 for p in stale_docs
                 if p.to_dict().get("user_id") and p.to_dict().get("user_id") != uid
             ]
+            if stale_user_ids:
+                logger.info(
+                    f"Stale queue reset triggered — queue_id={queue_id} clearing {len(stale_user_ids)} passengers from previous day"
+                )
 
         @firestore.transactional
         def transactional_update(transaction, queue_ref):
@@ -74,6 +94,9 @@ class QueueService:
                 passengers = []
 
             if len(passengers) >= MAX_PASSENGERS:
+                logger.warning(
+                    f"Join queue failed — queue full queue_id={queue_id} uid={uid} max={MAX_PASSENGERS}"
+                )
                 raise HTTPException(
                     status_code=400,
                     detail="This trip is already full. Please wait for the next trip schedule.",
@@ -115,6 +138,9 @@ class QueueService:
                     profile, {"in_queue": False, "in_queue_date": None}, merge=True
                 )
             batch.commit()
+            logger.info(
+                f"Stale profiles cleared — count={len(stale_user_ids)} queue_id={queue_id}"
+            )
 
         profile_ref.set({"in_queue": True, "in_queue_date": today}, merge=True)
 
@@ -132,6 +158,9 @@ class QueueService:
             },
         )
 
+        logger.info(
+            f"Passenger joined queue — uid={uid} full_name={full_name} queue_id={queue_id} ticket={ticket_number} is_privileged={is_privileged}"
+        )
         return {
             "ticket_number": ticket_number,
             "message": "Successfully joined queue",
@@ -140,11 +169,16 @@ class QueueService:
     async def leave_queue(self, uid: str, queue_id: str):
         profile_ref = self.db.collection("profiles").document(uid)
         profile_snapshot = profile_ref.get()
+
         if not profile_snapshot.exists:
+            logger.warning(
+                f"Leave queue failed — profile not found uid={uid} queue_id={queue_id}"
+            )
             raise HTTPException(status_code=404, detail="Profile not found")
 
         profile_data = profile_snapshot.to_dict() or {}
         if not profile_data.get("in_queue", False):
+            logger.warning(f"Leave queue failed — uid={uid} not in any queue")
             raise HTTPException(status_code=400, detail="User is not in a queue")
 
         queue_ref = self.db.collection("queues").document(queue_id)
@@ -158,6 +192,9 @@ class QueueService:
             docs = list(query.stream(transaction=transaction))
 
             if not docs:
+                logger.warning(
+                    f"Leave queue failed — uid={uid} not found in queue_id={queue_id}"
+                )
                 raise HTTPException(
                     status_code=404, detail="User not found in this queue"
                 )
@@ -185,6 +222,9 @@ class QueueService:
             },
         )
 
+        logger.info(
+            f"Passenger left queue — uid={uid} full_name={passenger_data.get('full_name')} ticket={passenger_data.get('ticket_number')} queue_id={queue_id}"
+        )
         return {"message": "User left the queue successfully"}
 
     def get_queue_status(self, uid: str, queue_id: str):
@@ -193,6 +233,9 @@ class QueueService:
 
         docs = list(passengers_ref.where("user_id", "==", uid).limit(1).stream())
         if not docs:
+            logger.warning(
+                f"Queue status failed — uid={uid} not found in queue_id={queue_id}"
+            )
             raise HTTPException(status_code=404, detail="User not found in queue")
 
         my_doc = docs[0]
@@ -258,6 +301,9 @@ class QueueService:
                 "created_at": firestore.SERVER_TIMESTAMP,
             }
         )
+        logger.info(
+            f"Terminal queue created — queue_id={queue_ref.id} destination={destination} priority_seat={priority_seat}"
+        )
         return queue_ref.id
 
     def get_passenger(self, uid: str, queue_id: str) -> dict:
@@ -266,6 +312,9 @@ class QueueService:
 
         docs = list(passengers_ref.where("user_id", "==", uid).limit(1).stream())
         if not docs:
+            logger.warning(
+                f"Get passenger failed — uid={uid} not found in queue_id={queue_id}"
+            )
             raise HTTPException(status_code=404, detail="User not found in queue")
 
         doc = docs[0]
@@ -292,6 +341,9 @@ class QueueService:
         )
 
         if not docs:
+            logger.warning(
+                f"Force remove failed — passenger_id={passenger_id} not found in queue_id={queue_id} attendant={attendant_uid}"
+            )
             raise HTTPException(
                 status_code=404,
                 detail="Passenger not found in this queue",
@@ -301,6 +353,7 @@ class QueueService:
         passenger_data = passenger_doc.to_dict() or {}
         passenger_ref = passenger_doc.reference
         passenger_ref.delete()
+
         profile_ref = self.db.collection("profiles").document(passenger_id)
         profile_snapshot = profile_ref.get()
 
@@ -319,6 +372,10 @@ class QueueService:
                     "removed_by": attendant_uid,
                 },
             },
+        )
+
+        logger.warning(
+            f"Passenger force removed — passenger_id={passenger_id} full_name={passenger_data.get('full_name')} ticket={passenger_data.get('ticket_number')} queue_id={queue_id} by attendant={attendant_uid}"
         )
         return {
             "success": True,

@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 from firebase_admin import firestore
 from datetime import datetime, timedelta, timezone
+from loguru import logger
 from app.core.geolocation_service import GeolocationService
 from app.core.notification_service import NotificationService
 from firebase_admin import firestore
@@ -22,6 +23,9 @@ class BusService:
         )
 
         for _ in existing:
+            logger.warning(
+                f"Bus creation failed — plate {bus_data['plate_number']} already registered"
+            )
             raise HTTPException(
                 status_code=409,
                 detail="A bus with this plate number is already registered",
@@ -53,6 +57,9 @@ class BusService:
         }
 
         bus_ref.set(bus_doc)
+        logger.info(
+            f"Bus created — bus_id={bus_ref.id} plate={bus_data['plate_number']} name={bus_data['bus_name']}"
+        )
         return bus_ref.id
 
     def get_all_buses(self):
@@ -84,6 +91,7 @@ class BusService:
         bus_snapshot = bus_ref.get()
 
         if not bus_snapshot.exists:
+            logger.warning(f"Bus not found — bus_id={bus_id}")
             raise HTTPException(status_code=404, detail="Bus not found")
 
         data = bus_snapshot.to_dict()
@@ -94,6 +102,7 @@ class BusService:
         bus_snapshot = bus_ref.get()
 
         if not bus_snapshot.exists:
+            logger.warning(f"Bus update failed — bus_id={bus_id} not found")
             raise HTTPException(status_code=404, detail="Bus not found")
 
         if "current_location" in update_data and update_data["current_location"]:
@@ -107,15 +116,16 @@ class BusService:
         bus_ref.update(update_data)
 
         updated_bus = bus_ref.get().to_dict()
+        logger.info(f"Bus updated — bus_id={bus_id}")
         return self._convert_geopoint_to_location(updated_bus)
 
     def _is_under_coding(self, plate_number: str) -> bool:
         coding_schedule = {
-            0: {"1", "2"},  # Monday
-            1: {"3", "4"},  # Tuesday
-            2: {"5", "6"},  # Wednesday
-            3: {"7", "8"},  # Thursday
-            4: {"9", "0"},  # Friday
+            0: {"1", "2"},
+            1: {"3", "4"},
+            2: {"5", "6"},
+            3: {"7", "8"},
+            4: {"9", "0"},
         }
         ph_tz = timezone(timedelta(hours=8))
         today = datetime.now(ph_tz).weekday()
@@ -129,23 +139,33 @@ class BusService:
         bus_snapshot = bus_ref.get()
 
         if not bus_snapshot.exists:
+            logger.warning(f"Claim failed — bus_id={bus_id} not found uid={uid}")
             raise HTTPException(status_code=404, detail="Bus not found")
 
         bus_data = bus_snapshot.to_dict()
 
         if bus_data.get("attendant_id") and bus_data.get("status") == "active":
+            logger.warning(
+                f"Claim failed — bus_id={bus_id} already claimed by {bus_data.get('attendant_name')} uid={uid}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"Bus is already claimed by attendant: {bus_data.get('attendant_name')}",
             )
 
         if bus_data.get("status") not in ["available", None]:
+            logger.warning(
+                f"Claim failed — bus_id={bus_id} not available status={bus_data.get('status')} uid={uid}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"Bus is not available. Current status: {bus_data.get('status')}",
             )
 
         if self._is_under_coding(bus_data.get("plate_number", "")):
+            logger.warning(
+                f"Claim failed — bus_id={bus_id} plate={bus_data.get('plate_number')} is under coding uid={uid}"
+            )
             raise HTTPException(
                 status_code=403,
                 detail=f"Vehicle {bus_data.get('bus_name')} with plate number {bus_data.get('plate_number')} is under coding today and cannot be claimed.",
@@ -162,6 +182,9 @@ class BusService:
             }
         )
 
+        logger.info(
+            f"Bus claimed — bus_id={bus_id} attendant={attendant_name} uid={uid}"
+        )
         return {
             "id": bus_id,
             "message": "Bus claimed successfully",
@@ -174,11 +197,15 @@ class BusService:
         bus_snapshot = bus_ref.get()
 
         if not bus_snapshot.exists:
+            logger.warning(f"Release failed — bus_id={bus_id} not found uid={uid}")
             raise HTTPException(status_code=404, detail="Bus not found")
 
         bus_data = bus_snapshot.to_dict()
 
         if bus_data.get("attendant_id") != uid:
+            logger.warning(
+                f"Release failed — uid={uid} is not assigned to bus_id={bus_id}"
+            )
             raise HTTPException(
                 status_code=403, detail="You are not assigned to this bus"
             )
@@ -194,6 +221,9 @@ class BusService:
             }
         )
 
+        logger.info(
+            f"Bus released — bus_id={bus_id} attendant={attendant_name} uid={uid}"
+        )
         return {
             "id": bus_id,
             "message": "Bus released successfully",
@@ -213,6 +243,7 @@ class BusService:
             data = bus_snapshot.to_dict()
             return self._convert_geopoint_to_location(data)
 
+        logger.warning(f"Get my bus failed — uid={uid} not assigned to any bus")
         raise HTTPException(status_code=404, detail="You are not assigned to any bus")
 
     def _convert_geopoint_to_location(self, data):
@@ -228,14 +259,23 @@ class BusService:
         bus_snapshot = bus_ref.get()
 
         if not bus_snapshot.exists:
+            logger.warning(
+                f"Location update failed — bus_id={bus_id} not found uid={uid}"
+            )
             raise HTTPException(status_code=404, detail="Bus not found")
 
         bus_data = bus_snapshot.to_dict()
 
         if bus_data.get("status") != "active":
+            logger.warning(
+                f"Location update failed — bus_id={bus_id} not active status={bus_data.get('status')} uid={uid}"
+            )
             raise HTTPException(status_code=400, detail="Bus is not active")
 
         if bus_data.get("attendant_id") != uid:
+            logger.warning(
+                f"Location update failed — uid={uid} not assigned to bus_id={bus_id}"
+            )
             raise HTTPException(
                 status_code=403,
                 detail="You are not the assigned attendant for this bus",
@@ -251,6 +291,9 @@ class BusService:
             }
         )
 
+        logger.info(
+            f"Bus location updated — bus_id={bus_id} lat={lat} lon={lon} uid={uid}"
+        )
         self._check_geofence_and_notify(bus_data, lat, lon)
 
         return {
@@ -260,7 +303,7 @@ class BusService:
         }
 
     def _check_geofence_and_notify(self, bus_data, lat, lon):
-        geofence = GeolocationService()
+        geofence = GeolocationService(self.db)
         notifier = NotificationService()
 
         bus_id = bus_data["id"]
@@ -275,6 +318,10 @@ class BusService:
         if not geofence.is_within_geofence(lat, lon):
             return
 
+        logger.info(
+            f"Bus {bus_id} entered geofence — checking for waiting passengers at destination={destination}"
+        )
+
         queue_query = (
             self.db.collection("queues")
             .where("destination", "==", destination)
@@ -285,6 +332,9 @@ class BusService:
 
         queue_docs = list(queue_query)
         if not queue_docs:
+            logger.info(
+                f"Geofence triggered but no waiting queue found for destination={destination} bus_id={bus_id}"
+            )
             return
 
         queue_ref = queue_docs[0].reference
@@ -298,8 +348,12 @@ class BusService:
         ]
 
         if not user_ids:
+            logger.info(
+                f"Geofence triggered but no waiting passengers found bus_id={bus_id}"
+            )
             return
 
+        notified = 0
         for user_id in user_ids:
             profile = self.db.collection("profiles").document(user_id).get().to_dict()
             token = profile.get("fcm_token") if profile else None
@@ -312,9 +366,14 @@ class BusService:
                 title="Your bus is approaching!",
                 body="Your bus is nearing Ayala Terminal. Please prepare for boarding.",
             )
+            notified += 1
 
         self.db.collection("buses").document(bus_id).update(
             {"last_proximity_notification_sent": firestore.SERVER_TIMESTAMP}
+        )
+
+        logger.info(
+            f"Proximity notifications sent — bus_id={bus_id} notified={notified} passengers"
         )
 
     def mark_bus_arrival(self, bus_id: str, uid: str):
@@ -322,11 +381,15 @@ class BusService:
         bus_snapshot = bus_ref.get()
 
         if not bus_snapshot.exists:
+            logger.warning(f"Arrival failed — bus_id={bus_id} not found uid={uid}")
             raise HTTPException(status_code=404, detail="Bus not found")
 
         bus = bus_snapshot.to_dict()
 
         if bus.get("attendant_id") != uid:
+            logger.warning(
+                f"Arrival failed — uid={uid} not assigned to bus_id={bus_id}"
+            )
             raise HTTPException(
                 status_code=403,
                 detail="You are not the assigned attendant for this bus",
@@ -334,12 +397,18 @@ class BusService:
 
         destination = bus.get("destination")
         if not destination:
+            logger.warning(
+                f"Arrival failed — bus_id={bus_id} has no destination uid={uid}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="Bus does not have an assigned destination",
             )
 
         if bus.get("status") == "arrived":
+            logger.info(
+                f"Bus already marked as arrived — bus_id={bus_id} queue_id={bus.get('current_queue_id')}"
+            )
             return {
                 "message": "Bus already marked as arrived",
                 "queue_id": bus.get("current_queue_id"),
@@ -361,6 +430,9 @@ class BusService:
                     "arrived_at": firestore.SERVER_TIMESTAMP,
                     "updated_at": firestore.SERVER_TIMESTAMP,
                 }
+            )
+            logger.warning(
+                f"Bus arrived but no queue found — bus_id={bus_id} destination={destination}"
             )
             return {
                 "message": "Bus arrived but no waiting queue found",
@@ -396,6 +468,7 @@ class BusService:
             queue_ref.collection("passengers").where("status", "==", "waiting").stream()
         )
 
+        notified = 0
         for p in waiting_passengers:
             passenger = p.to_dict()
             user_id = passenger.get("user_id")
@@ -415,7 +488,11 @@ class BusService:
                 title="Your bus has arrived!",
                 body=f"Please proceed to boarding. Your queue number is {ticket_number}.",
             )
+            notified += 1
 
+        logger.info(
+            f"Bus arrived — bus_id={bus_id} queue_id={queue_id} destination={destination} notified={notified} passengers uid={uid}"
+        )
         return {
             "message": "Bus arrival recorded and passengers notified",
             "queue_id": queue_id,
@@ -428,19 +505,27 @@ class BusService:
         ticket_number = payload.get("ticket_number")
 
         if not (user_id and queue_id and ticket_number):
+            logger.warning(f"QR scan failed — malformed payload bus_id={bus_id}")
             raise HTTPException(status_code=400, detail="Malformed QR payload")
 
         bus_ref = self.db.collection("buses").document(bus_id)
         bus_snapshot = bus_ref.get()
         if not bus_snapshot.exists:
+            logger.warning(f"QR scan failed — bus_id={bus_id} not found")
             raise HTTPException(status_code=404, detail="Bus not found")
 
         bus = bus_snapshot.to_dict()
 
         if bus.get("attendant_id") is None:
+            logger.warning(
+                f"QR scan failed — bus_id={bus_id} has no assigned attendant"
+            )
             raise HTTPException(status_code=403, detail="Bus has no assigned attendant")
 
         if bus.get("current_queue_id") != queue_id:
+            logger.warning(
+                f"QR scan failed — queue mismatch bus_id={bus_id} expected={bus.get('current_queue_id')} got={queue_id} user_id={user_id}"
+            )
             raise HTTPException(
                 status_code=400, detail="Passenger belongs to a different queue"
             )
@@ -450,16 +535,25 @@ class BusService:
         passenger_snapshot = passenger_ref.get()
 
         if not passenger_snapshot.exists:
+            logger.warning(
+                f"QR scan failed — ticket={ticket_number} not found in queue_id={queue_id}"
+            )
             raise HTTPException(status_code=404, detail="Passenger not found in queue")
 
         passenger = passenger_snapshot.to_dict()
 
         if passenger.get("user_id") != user_id:
+            logger.warning(
+                f"QR scan failed — user_id mismatch ticket={ticket_number} queue_id={queue_id}"
+            )
             raise HTTPException(
                 status_code=400, detail="QR does not match passenger entry"
             )
 
         if passenger.get("status") in ("boarded", "ongoing"):
+            logger.warning(
+                f"QR scan failed — passenger already boarded user_id={user_id} ticket={ticket_number} bus_id={bus_id}"
+            )
             raise HTTPException(status_code=400, detail="Passenger already boarded")
 
         passenger_ref.update(
@@ -494,6 +588,9 @@ class BusService:
             },
         )
 
+        logger.info(
+            f"Passenger boarded — user_id={user_id} full_name={full_name} ticket={ticket_number} bus_id={bus_id} queue_id={queue_id}"
+        )
         return {"message": "Passenger boarded successfully"}
 
     async def mark_bus_departure(self, bus_id: str, uid: str):
@@ -503,11 +600,15 @@ class BusService:
         bus_snapshot = bus_ref.get()
 
         if not bus_snapshot.exists:
+            logger.warning(f"Departure failed — bus_id={bus_id} not found uid={uid}")
             raise HTTPException(status_code=404, detail="Bus not found")
 
         bus = bus_snapshot.to_dict()
 
         if bus.get("attendant_id") != uid:
+            logger.warning(
+                f"Departure failed — uid={uid} not assigned to bus_id={bus_id}"
+            )
             raise HTTPException(
                 status_code=403,
                 detail="You are not the assigned attendant for this bus",
@@ -515,6 +616,9 @@ class BusService:
 
         queue_id = bus.get("current_queue_id")
         if not queue_id:
+            logger.warning(
+                f"Departure failed — bus_id={bus_id} not linked to any queue uid={uid}"
+            )
             raise HTTPException(
                 status_code=400, detail="Bus is not linked to any queue"
             )
@@ -526,6 +630,9 @@ class BusService:
         )
 
         if len(boarded_passengers) < MIN_PASSENGERS:
+            logger.warning(
+                f"Departure failed — insufficient passengers bus_id={bus_id} boarded={len(boarded_passengers)} minimum={MIN_PASSENGERS}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"Cannot start trip. Minimum {MIN_PASSENGERS} passengers required.",
@@ -561,6 +668,9 @@ class BusService:
             },
         )
 
+        logger.info(
+            f"Bus departed — bus_id={bus_id} queue_id={queue_id} passengers={len(boarded_passengers)} departed_at={departed_at.isoformat()} uid={uid}"
+        )
         return {
             "message": "Bus departure recorded",
             "bus_id": bus_id,
@@ -573,17 +683,24 @@ class BusService:
         bus_snapshot = bus_ref.get()
 
         if not bus_snapshot.exists:
+            logger.warning(f"Finish trip failed — bus_id={bus_id} not found uid={uid}")
             raise HTTPException(status_code=404, detail="Bus not found")
 
         bus = bus_snapshot.to_dict()
 
         if bus.get("attendant_id") != uid:
+            logger.warning(
+                f"Finish trip failed — uid={uid} not assigned to bus_id={bus_id}"
+            )
             raise HTTPException(
                 status_code=403,
                 detail="You are not the assigned attendant for this bus",
             )
 
         if bus.get("status") != "in_transit":
+            logger.warning(
+                f"Finish trip failed — bus_id={bus_id} not in transit status={bus.get('status')} uid={uid}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="Bus is not in transit",
@@ -591,6 +708,9 @@ class BusService:
 
         queue_id = bus.get("current_queue_id")
         if not queue_id:
+            logger.warning(
+                f"Finish trip failed — bus_id={bus_id} has no linked queue uid={uid}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="No queue linked to this bus",
@@ -598,6 +718,9 @@ class BusService:
 
         departed_at = bus.get("departed_at")
         if not departed_at:
+            logger.warning(
+                f"Finish trip failed — bus_id={bus_id} has no departure time uid={uid}"
+            )
             raise HTTPException(
                 status_code=400,
                 detail="Departure time not recorded. Ensure bus has departed before finishing trip.",
@@ -674,6 +797,9 @@ class BusService:
             }
         )
 
+        logger.info(
+            f"Trip finished — bus_id={bus_id} queue_id={queue_id} passengers_recorded={len(ongoing_passengers)} waiting_remaining={waiting_count} queue_status={'done' if waiting_count == 0 else 'waiting'} uid={uid}"
+        )
         return {
             "message": "Trip finished successfully",
             "bus_id": bus_id,
@@ -697,6 +823,7 @@ class BusService:
             bus = b.to_dict()
 
         if not bus:
+            logger.warning(f"Passenger list failed — uid={uid} not assigned to any bus")
             raise HTTPException(
                 status_code=404, detail="You are not assigned to any bus"
             )
@@ -706,6 +833,9 @@ class BusService:
         queue_id = bus.get("current_queue_id")
 
         if not queue_id:
+            logger.info(
+                f"Passenger list fetched — uid={uid} bus_id={bus_id} no active queue"
+            )
             return {
                 "bus_id": bus_id,
                 "capacity": capacity,
@@ -782,6 +912,7 @@ class BusService:
 
             grouped[key]["passenger_count"] += 1
 
+        logger.info(f"Attendant trip history fetched — uid={uid} trips={len(grouped)}")
         return {"trips": list(grouped.values())}
 
     def get_attendant_trip_detail(self, uid: str, trip_id: str):
@@ -789,6 +920,9 @@ class BusService:
             bus_id, departed_at_str = trip_id.split("_", 1)
             departed_at = datetime.fromisoformat(departed_at_str)
         except ValueError:
+            logger.warning(
+                f"Trip detail failed — invalid trip_id format trip_id={trip_id} uid={uid}"
+            )
             raise HTTPException(status_code=400, detail="Invalid trip_id format")
 
         start = departed_at
@@ -804,6 +938,7 @@ class BusService:
         )
 
         passengers = []
+        data = {}
 
         for doc in trips_query:
             data = doc.to_dict()
@@ -818,10 +953,12 @@ class BusService:
             )
 
         if not passengers:
+            logger.warning(f"Trip detail not found — trip_id={trip_id} uid={uid}")
             raise HTTPException(status_code=404, detail="Trip not found")
 
-        first = passengers[0]
-
+        logger.info(
+            f"Trip detail fetched — trip_id={trip_id} bus_id={bus_id} passengers={len(passengers)} uid={uid}"
+        )
         return {
             "trip_id": trip_id,
             "bus_id": bus_id,

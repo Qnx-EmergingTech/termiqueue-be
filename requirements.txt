@@ -6,4 +6,4 @@ httpx
 qrcode[pil]
 loguru
 google-cloud-logging
-prometheus-client>=0.20.0
+prometheus-client>=0.20.0prometheus_client

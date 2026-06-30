@@ -33,6 +33,9 @@ def metrics():
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    if request.url.path == "/metrics":
+        return await call_next(request)
+
     start = time.perf_counter()
     method = request.method
     path = request.url.path

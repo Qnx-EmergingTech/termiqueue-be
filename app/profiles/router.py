@@ -5,6 +5,8 @@ import requests, os
 from loguru import logger
 
 from app.profiles.schema import (
+    CreatUserAccountRequest,
+    CreateUserAccountResponse,
     UserProfile,
     UserProfileResponse,
     UserProfileUpdate,
@@ -21,6 +23,12 @@ from app.core.dependencies import get_firestore, verify_token
 from app.core.notification_service import NotificationService
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
+
+ALLOWED_EMAIL_DOMAINS = {
+    d.strip().lower()
+    for d in os.getenv("ALLOWED_EMAIL_DOMAINS", "questronix.com.ph").split(",")
+    if d.strip()
+}
 
 
 def get_profile_service(
@@ -221,3 +229,86 @@ def get_my_trip_detail(
         user_id=uid,
         trip_id=trip_id,
     )
+
+
+@router.post("/register", response_model=CreateUserAccountResponse)
+def register_user_profile(
+    payload: CreatUserAccountRequest, db: firestore.Client = Depends(get_firestore)
+):
+
+    domain = payload.email.split("@")[-1].lower()
+    if domain not in ALLOWED_EMAIL_DOMAINS:
+        voucher_valid = False
+        if payload.voucher_code:
+            voucher_ref = db.collection("voucher_code").document(payload.voucher_code)
+            voucher_snapshot = voucher_ref.get()
+
+            if not voucher_snapshot.exists:
+                logger.warning(
+                    f"Registration rejected — invalid voucher code '{payload.voucher_code}'"
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail="Invalid voucher code",
+                )
+
+            voucher_data = voucher_snapshot.to_dict()
+            if voucher_data.get("used", False):
+                logger.warning(
+                    f"Registration rejected — voucher code '{payload.voucher_code}' already used"
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail="Voucher code already used",
+                )
+
+            # Mark the voucher as used
+            voucher_ref.update({"used": True})
+            voucher_valid = True
+
+        if not voucher_valid:
+            logger.warning(f"Registration rejected — disallowed domain '{domain}'")
+            raise HTTPException(
+                status_code=403,
+                detail="Registration is restricted to company email addresses",
+            )
+
+    try:
+        user = auth.create_user(
+            email=payload.email,
+            password=payload.password,
+        )
+
+    except auth.EmailAlreadyExistsError:
+        logger.warning(
+            f"User registration failed — email already exists: {payload.email}"
+        )
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    except Exception as e:
+        logger.error(f"User registration failed for email={payload.email}: {e}")
+        raise HTTPException(status_code=400, detail="User registration failed")
+
+    username_lower = payload.username.lower()
+
+    existing = (
+        db.collection("profiles")
+        .where("username_lower", "==", username_lower)
+        .limit(1)
+        .get()
+    )
+
+    if existing:
+        logger.warning(f"Signup failed — username '{payload.username}' already taken")
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    db.collection("profiles").document(user.uid).set(
+        {
+            "username": payload.username,
+            "username_lower": username_lower,
+            "created_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+    )
+
+    return {"id": user.uid}

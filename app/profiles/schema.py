@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional, Literal
 from datetime import datetime
 
@@ -24,6 +24,17 @@ class UserProfileUpdate(BaseModel):
 
     def to_update_dict(self):
         return self.dict(exclude_unset=True)
+
+
+class CreatUserAccountRequest(BaseModel):
+    email: EmailStr
+    password: str
+    username: str
+    voucher_code: Optional[str] = None
+
+
+class CreateUserAccountResponse(BaseModel):
+    id: str
 
 
 class SignupRequest(BaseModel):

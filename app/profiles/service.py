@@ -65,3 +65,17 @@ class ProfileService:
             "departed_at": data.get("departed_at"),
             "finished_at": data.get("finished_at"),
         }
+
+
+class VoucherService:
+    def __init__(self, db: firestore.Client):
+        self.db = db
+
+    def code_exists(self, code_to_find: str) -> bool:
+        query = (
+            self.db.collection("voucher_code")
+            .where("code", "==", code_to_find)
+            .limit(1)  # stop after first match — cheaper
+        )
+        docs = query.get()
+        return len(docs) > 0

@@ -79,3 +79,15 @@ class VoucherService:
         )
         docs = query.get()
         return len(docs) > 0
+
+    def get_voucher_by_code(self, code_to_find: str):
+        docs = (
+            self.db.collection("voucher_code")
+            .where("code", "==", code_to_find)
+            .limit(1)
+            .get()
+        )
+        return docs[0] if docs else None
+
+    def mark_used(self, voucher_doc) -> None:
+        voucher_doc.reference.update({"used": True})

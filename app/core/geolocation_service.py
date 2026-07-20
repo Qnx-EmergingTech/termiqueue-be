@@ -8,13 +8,19 @@ from firebase_admin import firestore
 
 
 class GeolocationService:
-    def __init__(self, db: firestore.Client):
+    def __init__(self, db: firestore.Client, use_destination: bool = False):
         self.geofence_service = GeofenceService(db)
-        config = self.geofence_service.get_geofence()
+        config = (
+            self.geofence_service.get_destination_geofence()
+            if use_destination
+            else self.geofence_service.get_geofence()
+        )
 
-        self.lat = config.lat
-        self.lon = config.lon
-        self.geofence_radius_meters = config.radius_meters
+        self.configured = config is not None
+        if config is not None:
+            self.lat = config.lat
+            self.lon = config.lon
+            self.geofence_radius_meters = config.radius_meters
 
     def haversine(self, user_lat: float, user_lon: float) -> float:
         EARTH_RADIUS_METERS = 6371000
@@ -28,5 +34,7 @@ class GeolocationService:
         return EARTH_RADIUS_METERS * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
     def is_within_geofence(self, user_lat: float, user_lon: float) -> bool:
+        if not self.configured:
+            return False
         distance = self.haversine(user_lat, user_lon)
         return distance <= self.geofence_radius_meters

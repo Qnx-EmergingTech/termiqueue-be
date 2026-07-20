@@ -17,7 +17,7 @@ from app.profiles.schema import (
     TripSummary,
 )
 
-from app.profiles.service import ProfileService
+from app.profiles.service import ProfileService, VoucherService
 from app.core.dependencies import get_firestore, verify_token
 
 from app.core.notification_service import NotificationService
@@ -35,6 +35,12 @@ def get_profile_service(
     db: firestore.Client = Depends(get_firestore),
 ) -> ProfileService:
     return ProfileService(db)
+
+
+def get_voucher_service(
+    db: firestore.Client = Depends(get_firestore),
+) -> VoucherService:
+    return VoucherService(db)
 
 
 @router.post("/", response_model=UserProfileResponse)
@@ -233,17 +239,16 @@ def get_my_trip_detail(
 
 @router.post("/register", response_model=CreateUserAccountResponse)
 def register_user_profile(
-    payload: CreatUserAccountRequest, db: firestore.Client = Depends(get_firestore)
+    payload: CreatUserAccountRequest,
+    db: firestore.Client = Depends(get_firestore),
+    voucher_service: VoucherService = Depends(get_voucher_service),
 ):
 
     domain = payload.email.split("@")[-1].lower()
     if domain not in ALLOWED_EMAIL_DOMAINS:
         voucher_valid = False
         if payload.voucher_code:
-            voucher_ref = db.collection("voucher_code").document(payload.voucher_code)
-            voucher_snapshot = voucher_ref.get()
-
-            if not voucher_snapshot.exists:
+            if not voucher_service.code_exists(payload.voucher_code):
                 logger.warning(
                     f"Registration rejected — invalid voucher code '{payload.voucher_code}'"
                 )
@@ -252,7 +257,8 @@ def register_user_profile(
                     detail="Invalid voucher code",
                 )
 
-            voucher_data = voucher_snapshot.to_dict()
+            voucher_doc = voucher_service.get_voucher_by_code(payload.voucher_code)
+            voucher_data = voucher_doc.to_dict()
             if voucher_data.get("used", False):
                 logger.warning(
                     f"Registration rejected — voucher code '{payload.voucher_code}' already used"
@@ -263,7 +269,7 @@ def register_user_profile(
                 )
 
             # Mark the voucher as used
-            voucher_ref.update({"used": True})
+            voucher_service.mark_used(voucher_doc)
             voucher_valid = True
 
         if not voucher_valid:

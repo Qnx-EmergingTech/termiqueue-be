@@ -239,7 +239,7 @@ def add_manual_passenger(
 
     walkin_name = f"Walk-in #{next_number:04d}"
 
-    queue_data = queue_ref.get().to_dict()
+    queue_data = queue_ref.get().to_dict() or {}
     ticket_number = queue_data.get("next_ticket", 1)
 
     passengers_ref.document(str(ticket_number)).set(
@@ -349,7 +349,7 @@ def add_manual_privileged_passenger(
 
     walkin_name = f"Priority Walk-in #{next_number:04d}"
 
-    queue_data = queue_ref.get().to_dict()
+    queue_data = queue_ref.get().to_dict() or {}
     ticket_number = queue_data.get("next_ticket", 1)
 
     passengers_ref.document(str(ticket_number)).set(

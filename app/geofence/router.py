@@ -52,3 +52,53 @@ def update_geofence_config(
         f"Geofence updated by uid={uid} — lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
     )
     return {"message": "Geofence updated successfully"}
+
+
+@router.get("/destination", response_model=GeofenceConfig)
+def get_destination_geofence_config(
+    service: GeofenceService = Depends(get_geofence_service),
+):
+    config = service.get_destination_geofence()
+
+    if config is None:
+        raise HTTPException(
+            status_code=404, detail="Destination geofence has not been configured"
+        )
+
+    logger.info(
+        f"Destination geofence config fetched — lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
+    )
+    return config
+
+
+@router.put("/destination")
+def update_destination_geofence_config(
+    config: GeofenceConfig,
+    service: GeofenceService = Depends(get_geofence_service),
+    uid: str = Depends(verify_token),
+):
+    profile_ref = service.db.collection("profiles").document(uid)
+    profile_snapshot = profile_ref.get()
+
+    if not profile_snapshot.exists:
+        logger.warning(
+            f"Destination geofence update failed — profile not found for uid={uid}"
+        )
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    profile = profile_snapshot.to_dict()
+
+    if profile.get("user_type") != "admin":
+        logger.warning(
+            f"Destination geofence update denied — uid={uid} is not an admin"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Only admin users can update geofence configuration",
+        )
+
+    service.update_destination_geofence(config)
+    logger.info(
+        f"Destination geofence updated by uid={uid} — lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
+    )
+    return {"message": "Destination geofence updated successfully"}

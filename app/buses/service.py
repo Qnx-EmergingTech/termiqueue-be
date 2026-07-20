@@ -266,11 +266,11 @@ class BusService:
 
         bus_data = bus_snapshot.to_dict()
 
-        if bus_data.get("status") != "active":
+        if bus_data.get("status") not in ("active", "in_transit"):
             logger.warning(
-                f"Location update failed — bus_id={bus_id} not active status={bus_data.get('status')} uid={uid}"
+                f"Location update failed — bus_id={bus_id} not active or in transit status={bus_data.get('status')} uid={uid}"
             )
-            raise HTTPException(status_code=400, detail="Bus is not active")
+            raise HTTPException(status_code=400, detail="Bus is not active or in transit")
 
         if bus_data.get("attendant_id") != uid:
             logger.warning(
@@ -294,7 +294,11 @@ class BusService:
         logger.info(
             f"Bus location updated — bus_id={bus_id} lat={lat} lon={lon} uid={uid}"
         )
-        self._check_geofence_and_notify(bus_data, lat, lon)
+
+        if bus_data.get("status") == "in_transit":
+            self._check_destination_arrival(bus_data, lat, lon)
+        else:
+            self._check_geofence_and_notify(bus_data, lat, lon)
 
         return {
             "id": bus_id,
@@ -374,6 +378,83 @@ class BusService:
 
         logger.info(
             f"Proximity notifications sent — bus_id={bus_id} notified={notified} passengers"
+        )
+
+    def _check_destination_arrival(self, bus_data, lat, lon):
+        geofence = GeolocationService(self.db, use_destination=True)
+        notifier = NotificationService()
+
+        bus_id = bus_data["id"]
+        destination = bus_data.get("destination")
+        queue_id = bus_data.get("current_queue_id")
+
+        if not destination or not queue_id:
+            return
+
+        if bus_data.get("last_arrival_notification_sent"):
+            return
+
+        if not geofence.is_within_geofence(lat, lon):
+            return
+
+        logger.info(
+            f"Bus {bus_id} entered destination geofence — notifying ongoing passengers destination={destination}"
+        )
+
+        queue_ref = self.db.collection("queues").document(queue_id)
+        ongoing_passengers = (
+            queue_ref.collection("passengers").where("status", "==", "ongoing").stream()
+        )
+
+        user_ids = [
+            p.to_dict().get("user_id")
+            for p in ongoing_passengers
+            if p.to_dict().get("user_id")
+        ]
+
+        notified = 0
+        for user_id in user_ids:
+            profile = self.db.collection("profiles").document(user_id).get().to_dict()
+            token = profile.get("fcm_token") if profile else None
+
+            if not token:
+                continue
+
+            notifier.send_to_token(
+                token=token,
+                title="You've arrived!",
+                body=f"You have arrived at {destination}.",
+            )
+            notified += 1
+
+        attendant_id = bus_data.get("attendant_id")
+        attendant_notified = False
+        if attendant_id:
+            attendant_profile = (
+                self.db.collection("profiles").document(attendant_id).get().to_dict()
+            )
+            attendant_token = (
+                attendant_profile.get("fcm_token") if attendant_profile else None
+            )
+            if attendant_token:
+                notifier.send_to_token(
+                    token=attendant_token,
+                    title="You've reached your destination",
+                    body="Tap Finish Trip to complete this trip.",
+                    data={
+                        "type": "prompt_finish_trip",
+                        "bus_id": bus_id,
+                        "queue_id": queue_id,
+                    },
+                )
+                attendant_notified = True
+
+        self.db.collection("buses").document(bus_id).update(
+            {"last_arrival_notification_sent": firestore.SERVER_TIMESTAMP}
+        )
+
+        logger.info(
+            f"Arrival notifications sent — bus_id={bus_id} queue_id={queue_id} notified={notified} passengers, attendant_notified={attendant_notified}"
         )
 
     def mark_bus_arrival(self, bus_id: str, uid: str):
@@ -651,6 +732,7 @@ class BusService:
                 "departed_at": departed_at,
                 "boarded_count": 0,
                 "last_proximity_notification_sent": None,
+                "last_arrival_notification_sent": None,
                 "updated_at": firestore.SERVER_TIMESTAMP,
             }
         )
@@ -739,6 +821,7 @@ class BusService:
         )
 
         batch = self.db.batch()
+        notify_user_ids = []
 
         for p in ongoing_passengers:
             passenger = p.to_dict()
@@ -769,6 +852,9 @@ class BusService:
 
             batch.delete(p.reference)
 
+            if user_id:
+                notify_user_ids.append(user_id)
+
         waiting_passengers = list(
             passengers_ref.where("status", "==", "waiting").stream()
         )
@@ -797,8 +883,34 @@ class BusService:
             }
         )
 
+        notifier = NotificationService()
+        notified = 0
+        for user_id in notify_user_ids:
+            profile = self.db.collection("profiles").document(user_id).get().to_dict()
+            token = profile.get("fcm_token") if profile else None
+            if not token:
+                continue
+
+            notifier.send_to_token(
+                token=token,
+                title="Trip completed",
+                body=f"You have arrived at {destination}. Thank you for riding with us!",
+                data={"type": "end_trip", "bus_id": bus_id, "queue_id": queue_id},
+            )
+            notified += 1
+
+        attendant_profile = self.db.collection("profiles").document(uid).get().to_dict()
+        attendant_token = attendant_profile.get("fcm_token") if attendant_profile else None
+        if attendant_token:
+            notifier.send_to_token(
+                token=attendant_token,
+                title="Trip finished",
+                body=f"Trip to {destination} finished. {len(ongoing_passengers)} passengers recorded.",
+                data={"type": "end_trip", "bus_id": bus_id, "queue_id": queue_id},
+            )
+
         logger.info(
-            f"Trip finished — bus_id={bus_id} queue_id={queue_id} passengers_recorded={len(ongoing_passengers)} waiting_remaining={waiting_count} queue_status={'done' if waiting_count == 0 else 'waiting'} uid={uid}"
+            f"Trip finished — bus_id={bus_id} queue_id={queue_id} passengers_recorded={len(ongoing_passengers)} notified={notified} waiting_remaining={waiting_count} queue_status={'done' if waiting_count == 0 else 'waiting'} uid={uid}"
         )
         return {
             "message": "Trip finished successfully",

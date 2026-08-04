@@ -8,10 +8,15 @@ from firebase_admin import firestore
 
 
 class GeolocationService:
-    def __init__(self, db: firestore.Client, use_destination: bool = False):
+    def __init__(
+        self,
+        db: firestore.Client,
+        use_destination: bool = False,
+        destination: str | None = None,
+    ):
         self.geofence_service = GeofenceService(db)
         config = (
-            self.geofence_service.get_destination_geofence()
+            self.geofence_service.get_destination_geofence(destination)
             if use_destination
             else self.geofence_service.get_geofence()
         )

@@ -7,7 +7,7 @@ from app.geofence.schema import GeofenceConfig
 class GeofenceService:
     CONFIG_COLLECTION = "config"
     CONFIG_DOC = "geofence"
-    DESTINATION_CONFIG_DOC = "destination_geofence"
+    DESTINATION_GEOFENCE_COLLECTION = "destination_geofences"
 
     def __init__(self, db: firestore.Client):
         self.db = db
@@ -41,17 +41,22 @@ class GeofenceService:
                 radius_meters=GEOFENCE_RADIUS_METERS,
             )
 
-    def get_destination_geofence(self) -> GeofenceConfig | None:
-        ref = self.db.collection(self.CONFIG_COLLECTION).document(
-            self.DESTINATION_CONFIG_DOC
+    def get_destination_geofence(self, destination: str) -> GeofenceConfig | None:
+        query = (
+            self.db.collection(self.DESTINATION_GEOFENCE_COLLECTION)
+            .where("destination", "==", destination)
+            .limit(1)
+            .stream()
         )
-        snap = ref.get()
+        docs = list(query)
 
-        if not snap.exists:
-            logger.warning("Destination geofence config not found in Firestore")
+        if not docs:
+            logger.warning(
+                f"Destination geofence config not found — destination={destination}"
+            )
             return None
 
-        data = snap.to_dict() or {}
+        data = docs[0].to_dict() or {}
 
         try:
             return GeofenceConfig(
@@ -60,8 +65,14 @@ class GeofenceService:
                 radius_meters=data.get("radius_meters", GEOFENCE_RADIUS_METERS),
             )
         except Exception as e:
-            logger.error(f"Destination geofence config parse error: {e}")
+            logger.error(
+                f"Destination geofence config parse error — destination={destination}: {e}"
+            )
             return None
+
+    def list_destination_geofences(self) -> list[dict]:
+        docs = self.db.collection(self.DESTINATION_GEOFENCE_COLLECTION).stream()
+        return [doc.to_dict() for doc in docs]
 
     def update_geofence(self, config: GeofenceConfig):
         ref = self.db.collection(self.CONFIG_COLLECTION).document(self.CONFIG_DOC)
@@ -78,12 +89,23 @@ class GeofenceService:
             f"Geofence config saved to Firestore — lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
         )
 
-    def update_destination_geofence(self, config: GeofenceConfig):
-        ref = self.db.collection(self.CONFIG_COLLECTION).document(
-            self.DESTINATION_CONFIG_DOC
+    def update_destination_geofence(self, destination: str, config: GeofenceConfig):
+        query = (
+            self.db.collection(self.DESTINATION_GEOFENCE_COLLECTION)
+            .where("destination", "==", destination)
+            .limit(1)
+            .stream()
         )
+        docs = list(query)
+        ref = (
+            docs[0].reference
+            if docs
+            else self.db.collection(self.DESTINATION_GEOFENCE_COLLECTION).document()
+        )
+
         ref.set(
             {
+                "destination": destination,
                 "lat": config.lat,
                 "lon": config.lon,
                 "radius_meters": config.radius_meters,
@@ -92,5 +114,5 @@ class GeofenceService:
             merge=True,
         )
         logger.info(
-            f"Destination geofence config saved to Firestore — lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
+            f"Destination geofence config saved — destination={destination} lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
         )

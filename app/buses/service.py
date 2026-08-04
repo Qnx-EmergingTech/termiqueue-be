@@ -381,15 +381,17 @@ class BusService:
         )
 
     def _check_destination_arrival(self, bus_data, lat, lon):
-        geofence = GeolocationService(self.db, use_destination=True)
-        notifier = NotificationService()
-
         bus_id = bus_data["id"]
         destination = bus_data.get("destination")
         queue_id = bus_data.get("current_queue_id")
 
         if not destination or not queue_id:
             return
+
+        geofence = GeolocationService(
+            self.db, use_destination=True, destination=destination
+        )
+        notifier = NotificationService()
 
         if bus_data.get("last_arrival_notification_sent"):
             return

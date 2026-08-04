@@ -54,25 +54,37 @@ def update_geofence_config(
     return {"message": "Geofence updated successfully"}
 
 
-@router.get("/destination", response_model=GeofenceConfig)
-def get_destination_geofence_config(
+@router.get("/destination")
+def list_destination_geofence_configs(
     service: GeofenceService = Depends(get_geofence_service),
 ):
-    config = service.get_destination_geofence()
+    configs = service.list_destination_geofences()
+    logger.info(f"Destination geofence configs fetched — count={len(configs)}")
+    return configs
+
+
+@router.get("/destination/{destination}", response_model=GeofenceConfig)
+def get_destination_geofence_config(
+    destination: str,
+    service: GeofenceService = Depends(get_geofence_service),
+):
+    config = service.get_destination_geofence(destination)
 
     if config is None:
         raise HTTPException(
-            status_code=404, detail="Destination geofence has not been configured"
+            status_code=404,
+            detail=f"Destination geofence has not been configured for '{destination}'",
         )
 
     logger.info(
-        f"Destination geofence config fetched — lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
+        f"Destination geofence config fetched — destination={destination} lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
     )
     return config
 
 
-@router.put("/destination")
+@router.put("/destination/{destination}")
 def update_destination_geofence_config(
+    destination: str,
     config: GeofenceConfig,
     service: GeofenceService = Depends(get_geofence_service),
     uid: str = Depends(verify_token),
@@ -97,8 +109,8 @@ def update_destination_geofence_config(
             detail="Only admin users can update geofence configuration",
         )
 
-    service.update_destination_geofence(config)
+    service.update_destination_geofence(destination, config)
     logger.info(
-        f"Destination geofence updated by uid={uid} — lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
+        f"Destination geofence updated by uid={uid} — destination={destination} lat={config.lat} lon={config.lon} radius={config.radius_meters}m"
     )
     return {"message": "Destination geofence updated successfully"}
